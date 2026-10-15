@@ -1,0 +1,24 @@
+[package]
+name = "table-plus-core"
+description = "PostgreSQL engine behind table-plus-rs: sessions, catalog, SQL generation, storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+name = "table_plus_core"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs"] }
+tokio-postgres = { version = "0.7", features = ["runtime"] }
+tokio-postgres-rustls = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+futures-util = "0.3"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
+log = "0.4"
