@@ -14,6 +14,8 @@ pub struct Session {
     pub client: Arc<Client>,
     pub cancel: CancelToken,
     pub tls_used: bool,
+    /// False behind transaction-mode poolers, where named prepared statements hang.
+    pub supports_prepare: bool,
     /// Serialises query execution per session so a long-running query and a
     /// cancel request don't race; mirrors TablePlus' single connection per tab.
     pub exec_lock: Arc<Mutex<()>>,
@@ -40,7 +42,7 @@ fn build_config(cfg: &ConnectionConfig, database: &str) -> Config {
         pg.password(p);
     }
     pg.dbname(if database.is_empty() { "postgres" } else { database });
-    pg.application_name("Tusk");
+    pg.application_name("table-plus-rs");
     pg.connect_timeout(std::time::Duration::from_secs(15));
     if cfg.keep_alive {
         pg.keepalives(true);
@@ -52,6 +54,26 @@ fn build_config(cfg: &ConnectionConfig, database: &str) -> Config {
         _ => tokio_postgres::config::SslMode::Prefer,
     });
     pg
+}
+
+/// Probes named prepared-statement support on a *throwaway* connection.
+/// Transaction poolers (Supabase's Supavisor on 6543, PgBouncer) accept `Parse`
+/// but wedge the connection on the following `Close`, so the probe must never
+/// touch the real session. Any failure or timeout counts as unsupported.
+async fn probe_prepare(cfg: &ConnectionConfig, database: &str) -> bool {
+    let Ok((client, task, _)) = connect_raw(cfg, database).await else { return false };
+    let probe = async {
+        let stmt = client.prepare("SELECT 1").await.ok()?;
+        drop(stmt);
+        client.simple_query("SELECT 1").await.ok()?;
+        Some(())
+    };
+    let ok = tokio::time::timeout(std::time::Duration::from_secs(3), probe).await.ok().flatten().is_some();
+    task.abort();
+    if !ok {
+        log::info!("named prepared statements unsupported (transaction pooler?) – column type lookup disabled");
+    }
+    ok
 }
 
 /// Connects and returns (client, connection task, tls_used).
@@ -76,19 +98,24 @@ async fn connect_raw(
             log::warn!("connection closed: {e}");
         }
     });
-    // tokio-postgres doesn't expose whether Prefer negotiated TLS; ask the server.
-    let tls_used = client
-        .query_one("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()", &[])
-        .await
-        .map(|r| r.get::<_, bool>(0))
-        .unwrap_or(false);
+    // require/verify-* fail without TLS, so they're certain. For prefer, tokio-postgres doesn't
+    // expose the outcome; ask the server (behind a pooler this reflects the pooler->server leg).
+    let tls_used = if cfg.ssl_mode == "prefer" {
+        client
+            .query_typed_one("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()", &[])
+            .await
+            .map(|r| r.get::<_, bool>(0))
+            .unwrap_or(false)
+    } else {
+        true
+    };
     Ok((client, task, tls_used))
 }
 
 impl SessionManager {
     pub async fn test(cfg: &ConnectionConfig) -> AppResult<String> {
         let (client, task, tls) = connect_raw(cfg, &cfg.database).await?;
-        let row = client.query_one("SELECT version()", &[]).await?;
+        let row = client.query_typed_one("SELECT version()", &[]).await?;
         let v: String = row.get(0);
         task.abort();
         Ok(format!("{v}{}", if tls { " (TLS)" } else { "" }))
@@ -100,7 +127,7 @@ impl SessionManager {
         let cancel = client.cancel_token();
 
         let row = client
-            .query_one(
+            .query_typed_one(
                 "SELECT version(), current_setting('server_version_num')::int, current_database(), current_user, \
                  (SELECT version FROM pg_stat_ssl WHERE pid = pg_backend_pid())",
                 &[],
@@ -116,6 +143,7 @@ impl SessionManager {
             client.batch_execute(&cfg.startup_commands).await?;
         }
 
+        let supports_prepare = probe_prepare(&cfg, &db).await;
         let session_id = uuid::Uuid::new_v4().to_string();
         let short_version = version
             .split_whitespace()
@@ -131,7 +159,7 @@ impl SessionManager {
             host: cfg.host.clone(),
             server_version: short_version,
             server_version_num: version_num,
-            tls: if tls_used { tls_version.or(Some("TLS".into())) } else { None },
+            tls: if tls_used { tls_version.filter(|v| !v.is_empty()).or(Some("TLS".into())) } else { None },
             environment: cfg.environment.clone(),
             color: cfg.color.clone(),
             limit_rows_returned: cfg.limit_rows_returned,
@@ -142,6 +170,7 @@ impl SessionManager {
             client: Arc::new(client),
             cancel,
             tls_used,
+            supports_prepare,
             exec_lock: Arc::new(Mutex::new(())),
             task,
         };
@@ -172,12 +201,14 @@ impl SessionManager {
         if !cfg.startup_commands.trim().is_empty() {
             client.batch_execute(&cfg.startup_commands).await?;
         }
+        let supports_prepare = probe_prepare(&cfg, &db).await;
         let session = Session {
             info: old.info.clone(),
             config: cfg,
             client: Arc::new(client),
             cancel,
             tls_used,
+            supports_prepare,
             exec_lock: Arc::new(Mutex::new(())),
             task,
         };

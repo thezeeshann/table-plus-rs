@@ -26,6 +26,9 @@ export function QueryTab({ tab, active }: { tab: Tab; active: boolean }) {
   const [sql, setSql] = useState(tab.sql ?? "");
   const [results, setResults] = useState<QueryResult[]>([]);
   const [running, setRunning] = useState(false);
+  const setTabBusy = useApp((s) => s.setTabBusy);
+  useEffect(() => { setTabBusy(tab.id, running); }, [running, tab.id, setTabBusy]);
+  useEffect(() => () => setTabBusy(tab.id, false), [tab.id, setTabBusy]);
   const [editorHeight, setEditorHeight] = useState(0.5);
   const [schemaMap, setSchemaMap] = useState<Record<string, string[]>>({});
   const [favDialog, setFavDialog] = useState(false);

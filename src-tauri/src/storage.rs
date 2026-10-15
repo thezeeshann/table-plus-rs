@@ -1,6 +1,7 @@
 //! Local persistence: connections.json (mirrors TablePlus' Connections.plist
 //! fields), settings.json, favorites.json and per-connection history files.
-//! Passwords go to the OS keychain, like TablePlus.
+//! Passwords live in connections.json (mode 0600). The OS keychain is deliberately
+//! not used: unsigned builds re-prompt for the login password on every rebuild.
 
 use crate::error::{AppError, AppResult};
 use crate::model::*;
@@ -8,8 +9,6 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
-
-const KEYRING_SERVICE: &str = "dev.zeeshan.tusk";
 
 pub struct Storage {
     root: PathBuf,
@@ -22,7 +21,7 @@ struct ConnectionsFile {
     connections: Vec<ConnectionConfig>,
     #[serde(default)]
     groups: Vec<ConnectionGroup>,
-    /// Fallback when the keychain is unavailable (e.g. unsigned dev builds).
+    /// Connection id -> password.
     #[serde(default)]
     passwords: std::collections::BTreeMap<String, String>,
 }
@@ -50,12 +49,14 @@ impl Storage {
 
     fn write_connections(&self, f: &ConnectionsFile) -> AppResult<()> {
         let tmp = self.connections_path().with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_vec_pretty(f)?)?;
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600); // owner-only from creation: the file holds passwords
         }
+        opts.open(&tmp)?.write_all(&serde_json::to_vec_pretty(f)?)?;
         fs::rename(tmp, self.connections_path())?;
         Ok(())
     }
@@ -75,17 +76,8 @@ impl Storage {
             .find(|c| c.id == id)
             .cloned()
             .ok_or_else(|| AppError::ConnectionNotFound(id.to_string()))?;
-        c.password = self.load_password(id, &f);
+        c.password = f.passwords.get(id).cloned();
         Ok(c)
-    }
-
-    fn load_password(&self, id: &str, f: &ConnectionsFile) -> Option<String> {
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, id) {
-            if let Ok(p) = entry.get_password() {
-                return Some(p);
-            }
-        }
-        f.passwords.get(id).cloned()
     }
 
     pub fn save_connection(&self, mut cfg: ConnectionConfig) -> AppResult<ConnectionConfig> {
@@ -98,15 +90,7 @@ impl Storage {
             cfg.created_at = Some(chrono::Utc::now().to_rfc3339());
         }
         if let Some(pw) = cfg.password.take() {
-            let stored = keyring::Entry::new(KEYRING_SERVICE, &cfg.id)
-                .and_then(|e| e.set_password(&pw))
-                .is_ok();
-            if stored {
-                f.passwords.remove(&cfg.id);
-            } else {
-                log::warn!("keychain unavailable; storing password in connections.json");
-                f.passwords.insert(cfg.id.clone(), pw);
-            }
+            f.passwords.insert(cfg.id.clone(), pw);
         }
         match f.connections.iter_mut().find(|c| c.id == cfg.id) {
             Some(existing) => *existing = cfg.clone(),
@@ -121,9 +105,6 @@ impl Storage {
         let mut f = self.read_connections()?;
         f.connections.retain(|c| c.id != id);
         f.passwords.remove(id);
-        if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, id) {
-            let _ = e.delete_credential();
-        }
         self.write_connections(&f)?;
         let _ = fs::remove_file(self.history_path(id));
         Ok(())
@@ -232,5 +213,37 @@ impl Storage {
         let _g = self.lock.lock().unwrap();
         let _ = fs::remove_file(self.history_path(connection_id));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(password: Option<&str>) -> ConnectionConfig {
+        let mut c: ConnectionConfig = serde_json::from_value(serde_json::json!({ "id": "", "name": "t" })).unwrap();
+        c.password = password.map(String::from);
+        c
+    }
+
+    #[test]
+    fn password_round_trips_through_the_file_without_the_keychain() {
+        let dir = std::env::temp_dir().join(format!("table-plus-rs-storage-{}", uuid::Uuid::new_v4()));
+        let s = Storage::new(dir.clone()).unwrap();
+        let saved = s.save_connection(cfg(Some("hunter2"))).unwrap();
+        assert_eq!(saved.password, None, "never echoed back in the saved config");
+        assert_eq!(s.get_connection(&saved.id).unwrap().password.as_deref(), Some("hunter2"));
+        // Editing without retyping the password keeps it.
+        let again = s.save_connection(ConnectionConfig { name: "renamed".into(), ..saved.clone() }).unwrap();
+        assert_eq!(s.get_connection(&again.id).unwrap().password.as_deref(), Some("hunter2"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.join("connections.json")).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        s.delete_connection(&saved.id).unwrap();
+        assert!(s.get_connection(&saved.id).is_err());
+        let _ = fs::remove_dir_all(dir);
     }
 }

@@ -44,7 +44,7 @@ export function DefinitionView({ tab }: { tab: Tab }) {
         <button className="btn !py-[2px]" disabled={!ddl} onClick={() => { if (ddl) { navigator.clipboard.writeText(ddl); toast("ok", "Copied"); } }}><Copy size={12} /> Copy</button>
         <button className="btn !py-[2px]" disabled={!ddl} onClick={() => ddl && openQueryTab(ddl, `${tab.name} DDL`)}><Terminal size={12} /> Open in editor</button>
       </div>
-      {err && <div className="p-3 text-[#ff7b7b] selectable">{err}</div>}
+      {err && <div className="p-3 text-[var(--danger-text)] selectable">{err}</div>}
       {!ddl && !err && <div className="p-3 text-dim flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Loading…</div>}
       {ddl && <div className="flex-1 min-h-0"><SqlEditor value={ddl} readOnly /></div>}
     </div>

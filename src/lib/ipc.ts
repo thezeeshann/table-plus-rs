@@ -21,6 +21,7 @@ export const ipc = {
   saveGroup: (group: T.ConnectionGroup) => invoke<T.ConnectionGroup>("save_group", { group }),
   deleteGroup: (id: string) => invoke<void>("delete_group", { id }),
   testConnection: (config: T.ConnectionConfig) => invoke<string>("test_connection", { config }),
+  launchTheme: () => invoke<{ flag: string | null; env: string | null }>("launch_theme"),
   getSettings: () => invoke<T.AppSettings>("get_settings"),
   saveSettings: (settings: T.AppSettings) => invoke<void>("save_settings", { settings }),
   listFavorites: () => invoke<T.FavoriteQuery[]>("list_favorites"),

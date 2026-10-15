@@ -33,7 +33,7 @@ export function ResultsPane({ results, running }: { results: QueryResult[]; runn
       <div className="h-7 flex items-stretch bg-app border-b border-border shrink-0 overflow-x-auto">
         {results.map((res, i) => (
           <button key={i} className={`px-3 text-xs flex items-center gap-1.5 border-r border-separator ${i === idx ? "bg-tab-selected text-white" : "text-tab-text hover:bg-tab-hover"}`} onClick={() => setActive(i)} title={res.statement.slice(0, 300)}>
-            {res.error ? <AlertTriangle size={11} className="text-[#ff7b7b]" /> : <CheckCircle2 size={11} className="text-[#8bd36a]" />}
+            {res.error ? <AlertTriangle size={11} className="text-[var(--danger-text)]" /> : <CheckCircle2 size={11} className="text-[var(--success-text)]" />}
             {res.columns.length ? `Result ${i + 1}` : res.command ?? "Statement"}{res.columns.length ? ` (${formatCount(res.rows.length)})` : ""}
           </button>
         ))}
@@ -50,7 +50,7 @@ export function ResultsPane({ results, running }: { results: QueryResult[]; runn
       </div>
       {r?.error ? (
         <div className="flex-1 overflow-auto p-3 text-xs selectable">
-          <div className="text-[#ff7b7b] font-semibold mb-1">ERROR{r.error.code ? ` [${r.error.code}]` : ""}: {r.error.message}</div>
+          <div className="text-[var(--danger-text)] font-semibold mb-1">ERROR{r.error.code ? ` [${r.error.code}]` : ""}: {r.error.message}</div>
           {r.error.detail && <div className="text-dim">DETAIL: {r.error.detail}</div>}
           {r.error.hint && <div className="text-dim">HINT: {r.error.hint}</div>}
           {r.error.position != null && <div className="text-dim">POSITION: {r.error.position}</div>}
@@ -69,7 +69,7 @@ export function ResultsPane({ results, running }: { results: QueryResult[]; runn
         ])} emptyText="Query returned no rows" />
       ) : (
         <div className="flex-1 p-3 text-xs selectable">
-          <div className="text-[#8bd36a]">{r?.command ?? "OK"}{r?.rowsAffected != null ? ` · ${formatCount(r.rowsAffected)} row${r.rowsAffected === 1 ? "" : "s"} affected` : ""}</div>
+          <div className="text-[var(--success-text)]">{r?.command ?? "OK"}{r?.rowsAffected != null ? ` · ${formatCount(r.rowsAffected)} row${r.rowsAffected === 1 ? "" : "s"} affected` : ""}</div>
           <pre className="mono mt-2 text-dim whitespace-pre-wrap">{r?.statement}</pre>
         </div>
       )}

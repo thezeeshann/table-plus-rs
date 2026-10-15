@@ -1,3 +1,4 @@
+use tokio_postgres::types::Type;
 use crate::error::{AppError, AppResult};
 use crate::model::*;
 use crate::pg::catalog;
@@ -21,9 +22,9 @@ pub async fn fetch_rows(state: State<'_, AppState>, req: FetchRowsRequest) -> Ap
     // columns used by quick filter: everything castable to text (i.e. everything)
     let text_cols: Vec<String> = if req.quick_filter.as_deref().map(|q| !q.trim().is_empty()).unwrap_or(false) {
         s.client
-            .query(
+            .query_typed(
                 "SELECT a.attname::text FROM pg_attribute a WHERE a.attrelid = (quote_ident($1::text) || '.' || quote_ident($2::text))::regclass AND a.attnum > 0 AND NOT a.attisdropped",
-                &[&req.schema, &req.table],
+                &[(&req.schema, Type::TEXT), (&req.table, Type::TEXT)],
             )
             .await?
             .iter()
@@ -38,7 +39,7 @@ pub async fn fetch_rows(state: State<'_, AppState>, req: FetchRowsRequest) -> Ap
 
     let mut sql = format!(
         "SELECT {}* FROM {rel}",
-        if ctid { "ctid::text AS \"__tusk_ctid\", " } else { "" }
+        if ctid { "ctid::text AS \"__table_plus_rs_ctid\", " } else { "" }
     );
     if !where_.is_empty() {
         sql.push_str(&format!(" WHERE {where_}"));
@@ -49,7 +50,7 @@ pub async fn fetch_rows(state: State<'_, AppState>, req: FetchRowsRequest) -> Ap
     sql.push_str(&format!(" LIMIT {} OFFSET {}", req.limit.max(1), req.offset));
 
     let started = Instant::now();
-    let mut results = run_statement(&s.client, &sql, req.limit as usize + 1).await?;
+    let mut results = run_statement(&s.client, &sql, req.limit as usize + 1, s.supports_prepare).await?;
     let res = results.pop().ok_or_else(|| AppError::msg("no result"))?;
     if let Some(err) = res.error {
         return Err(AppError::Message(
@@ -88,7 +89,7 @@ pub async fn fetch_rows(state: State<'_, AppState>, req: FetchRowsRequest) -> Ap
                     "SELECT count(*) FROM {rel}{}",
                     if where_.is_empty() { String::new() } else { format!(" WHERE {where_}") }
                 );
-                match s.client.query_one(&csql, &[]).await {
+                match s.client.query_typed_one(&csql, &[]).await {
                     Ok(r) => (Some(r.get::<_, i64>(0)), false),
                     Err(_) => (est, true),
                 }

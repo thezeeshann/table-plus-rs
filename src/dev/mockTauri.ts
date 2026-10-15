@@ -37,11 +37,15 @@ const applied: string[] = [];
 const history: T.HistoryEntry[] = [{ id: "h1", connectionId: "c1", database: "tusk_demo", sql: "SELECT * FROM users LIMIT 100;", at: new Date().toISOString(), durationMs: 12, ok: true, message: null, rows: 100 }];
 const favorites: T.FavoriteQuery[] = [{ id: "f1", name: "Active users", sql: "SELECT * FROM users WHERE active;", connectionId: null, createdAt: new Date().toISOString() }];
 
+// Legacy value on purpose: exercises the jade-dark -> default alias.
+let settings: any = { defaultLimit: 300, estimateCountThreshold: 100000, theme: "jade-dark", editorFontSize: 13, historyKeepDays: 0, autoCloseBrackets: true };
+
 async function invoke(cmd: string, args: any = {}): Promise<any> {
   (window as any).__mockCalls = [...((window as any).__mockCalls ?? []), { cmd, args }];
   switch (cmd) {
-    case "get_settings": return { defaultLimit: 300, estimateCountThreshold: 100000, theme: "jade-dark", editorFontSize: 13, historyKeepDays: 0, autoCloseBrackets: true };
-    case "save_settings": return null;
+    case "get_settings": return settings;
+    case "save_settings": settings = args.settings; return null;
+    case "launch_theme": { const q = new URLSearchParams(location.search); return { flag: q.get("theme"), env: q.get("env-theme") }; }
     case "list_connections": return [connections, groups];
     case "get_connection": return connections.find((c) => c.id === args.id);
     case "save_connection": { const c = { ...args.config, id: args.config.id || "c3" }; const i = connections.findIndex((x) => x.id === c.id); if (i >= 0) connections[i] = c; else connections.push(c); return c; }
@@ -70,6 +74,8 @@ async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "object_ddl": return `CREATE TABLE "public"."${args.name}" (\n    "id" bigint NOT NULL,\n    PRIMARY KEY ("id")\n);`;
     case "fetch_rows": {
       const r: T.FetchRowsRequest = args.req;
+      const slow = Number(new URLSearchParams(location.search).get("slow")) || 0; // ?slow=ms simulates a laggy pooler
+      if (slow) await new Promise((res) => setTimeout(res, slow));
       const cols = (structures[r.table] ?? structures.users).columns.map((c) => ({ name: c.name, typeName: c.dataType, typeOid: 0 }));
       const rows = r.table === "users" ? userRows(r.limit, Number(r.offset)) : Array.from({ length: 25 }, (_, i) => cols.map((c, j) => (j === 0 ? String(i + 1) : `${c.name} ${i + 1}`)));
       const filtered = r.filters.length ? rows.slice(0, 3) : rows;

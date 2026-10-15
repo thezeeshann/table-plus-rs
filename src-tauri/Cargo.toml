@@ -1,13 +1,13 @@
 [package]
-name = "tusk"
+name = "table-plus-rs"
 version = "0.1.0"
-description = "Tusk - a fast PostgreSQL desktop client"
+description = "table-plus-rs - a fast PostgreSQL desktop client"
 authors = ["thezeeshann"]
 edition = "2021"
 rust-version = "1.77"
 
 [lib]
-name = "tusk_lib"
+name = "table_plus_rs_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -28,7 +28,6 @@ futures-util = "0.3"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-keyring = { version = "3", features = ["apple-native"] }
 csv = "1"
 log = "0.4"
 env_logger = "0.11"

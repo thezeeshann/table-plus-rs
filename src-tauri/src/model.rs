@@ -374,7 +374,7 @@ pub struct AppSettings {
     pub last_connection_id: Option<String>,
 }
 fn default_estimate_threshold() -> i64 { 100_000 }
-fn default_theme() -> String { "jade-dark".into() }
+fn default_theme() -> String { "default".into() }
 fn default_font_size() -> u8 { 13 }
 
 impl Default for AppSettings {

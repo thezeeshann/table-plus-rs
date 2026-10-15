@@ -13,10 +13,10 @@ export const CONNECTION_COLORS: Record<string, string> = {
 };
 
 export function envBadge(env: string) {
-  const map: Record<string, string> = { production: "#8f2f31", staging: "#8b6826", testing: "#005392", local: "#007f3d" };
+  const map: Record<string, string> = { production: "var(--status-err)", staging: "var(--status-warn)", testing: "var(--conn-3)", development: "var(--conn-2)", local: "var(--conn-1)" };
   const color = map[env.toLowerCase()];
   if (!color) return null;
-  return <span className="env-badge" style={{ background: color, color: "#fff" }}>{env}</span>;
+  return <span className="env-badge" style={{ background: color, color: "var(--on-accent)" }}>{env}</span>;
 }
 
 export function WelcomeScreen() {

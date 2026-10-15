@@ -10,30 +10,33 @@ use tokio_postgres::{Client, SimpleQueryMessage};
 
 pub const MAX_RESULT_ROWS: usize = 100_000;
 
-/// Column types for a statement via a throwaway prepare. Best-effort: utility
-/// statements that can't be prepared just yield name-only columns later.
-async fn describe(client: &Client, sql: &str) -> Option<Vec<ResultColumn>> {
-    let stmt = client.prepare(sql).await.ok()?;
-    Some(
-        stmt.columns()
-            .iter()
-            .map(|c| ResultColumn {
-                name: c.name().to_string(),
-                type_name: c.type_().name().to_string(),
-                type_oid: c.type_().oid(),
-            })
-            .collect(),
-    )
+/// Column types for a statement via a throwaway prepare, bounded by a short
+/// timeout. Callers pass `allow = false` on transaction poolers (PgBouncer /
+/// Supavisor), which never answer named `prepare` calls.
+async fn describe(client: &Client, sql: &str, allow: bool) -> Option<Vec<ResultColumn>> {
+    if !allow {
+        return None;
+    }
+    let fut = async {
+        let stmt = client.prepare(sql).await.ok()?;
+        Some(
+            stmt.columns()
+                .iter()
+                .map(|c| ResultColumn { name: c.name().to_string(), type_name: c.type_().name().to_string(), type_oid: c.type_().oid() })
+                .collect::<Vec<_>>(),
+        )
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), fut).await.ok().flatten()
 }
 
 /// Executes one statement and collects every result set it produces.
-pub async fn run_statement(client: &Client, sql: &str, row_limit: usize) -> AppResult<Vec<QueryResult>> {
+pub async fn run_statement(client: &Client, sql: &str, row_limit: usize, describe_types: bool) -> AppResult<Vec<QueryResult>> {
     let kw = leading_keyword(sql);
     let wants_types = matches!(
         kw.as_str(),
         "SELECT" | "WITH" | "TABLE" | "VALUES" | "SHOW" | "EXPLAIN" | "INSERT" | "UPDATE" | "DELETE" | "MERGE"
     );
-    let typed = if wants_types { describe(client, sql).await } else { None };
+    let typed = if wants_types { describe(client, sql, describe_types).await } else { None };
 
     let started = Instant::now();
     let stream = client.simple_query_raw(sql).await;
@@ -69,7 +72,7 @@ pub async fn run_statement(client: &Client, sql: &str, row_limit: usize) -> AppR
                         Some(t) if t.len() == cols.len() => t.clone(),
                         _ => cols
                             .iter()
-                            .map(|c| ResultColumn { name: c.name().to_string(), type_name: "text".into(), type_oid: 0 })
+                            .map(|c| ResultColumn { name: c.name().to_string(), type_name: String::new(), type_oid: 0 })
                             .collect(),
                     };
                     current = Some(QueryResult {
@@ -146,10 +149,10 @@ pub async fn run_statement(client: &Client, sql: &str, row_limit: usize) -> AppR
 
 /// Runs a whole script statement by statement, stopping at the first error
 /// (TablePlus behaviour for "Run All").
-pub async fn run_script(client: &Client, script: &str, row_limit: usize, stop_on_error: bool) -> AppResult<Vec<QueryResult>> {
+pub async fn run_script(client: &Client, script: &str, row_limit: usize, stop_on_error: bool, describe_types: bool) -> AppResult<Vec<QueryResult>> {
     let mut all = Vec::new();
     for (stmt, _, _) in split_statements(script) {
-        let res = run_statement(client, &stmt, row_limit).await?;
+        let res = run_statement(client, &stmt, row_limit, describe_types).await?;
         let failed = res.iter().any(|r| r.error.is_some());
         all.extend(res);
         if failed && stop_on_error {

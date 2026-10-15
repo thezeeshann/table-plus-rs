@@ -19,6 +19,7 @@ export function Toolbar() {
   const section = useApp((s) => s.sidebarSection);
   const tabActions = useApp((s) => s.tabActions);
   const tab = useActiveTab();
+  const busy = useApp((s) => !!(s.activeTabId && s.busyTabs[s.activeTabId]));
   if (!session) return null;
 
   const env = (connection?.environment || "LOCAL").toUpperCase();
@@ -36,13 +37,13 @@ export function Toolbar() {
       <button className="icon-btn" title={`Open database (${mod}K)`} onClick={() => setOpenDb(true)}><Lock size={15} /></button>
       <button className="icon-btn" title={`New SQL query (${mod}T)`} onClick={() => openQueryTab()}><Terminal size={15} /></button>
       <div
-        className={`status-pill ${status === "disconnected" ? "disconnected" : status === "reconnecting" ? "reconnecting" : ""}`}
+        className={`status-pill ${status === "disconnected" ? "disconnected" : status === "reconnecting" ? "reconnecting" : busy ? "loading" : ""}`}
         title={status === "disconnected" ? `Disconnected – ${mod}⇧R to reconnect` : pill}
         onClick={() => { if (status === "disconnected") reconnect(); }}
-        style={{ borderLeft: `4px solid ${connection ? `var(--conn-${connection.color})` : "transparent"}` }}
+        style={{ borderLeft: `4px solid ${connection ? `var(--conn-${connection.color})` : "transparent"}`, ["--pill-fill" as string]: connection ? `var(--conn-${connection.color})` : undefined }}
         data-tauri-drag-region
       >
-        {status === "disconnected" ? `Database is disconnected! Press ${mod}⇧R to reconnect` : pill}
+        {status === "disconnected" ? `Database is disconnected! Press ${mod}⇧R to reconnect` : busy && status !== "reconnecting" ? `${env} | ${tab?.type === "query" ? "Running query" : `Loading ${where}`}…` : pill}
       </div>
       <button className="icon-btn" title={`Reload (${mod}R)`} onClick={() => { tab && tabActions[tab.id]?.reload?.(); refreshListing(); }}><RotateCw size={15} /></button>
       <button className="icon-btn" title={`Add row (${mod}I)`} disabled={!tab || tab.type !== "table"} onClick={() => tab && tabActions[tab.id]?.addRow?.()}><Plus size={15} /></button>

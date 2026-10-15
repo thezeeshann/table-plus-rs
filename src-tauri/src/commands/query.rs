@@ -28,9 +28,9 @@ pub async fn run_query(state: State<'_, AppState>, req: RunQueryRequest) -> AppR
     let _guard = s.exec_lock.lock().await;
     let limit = req.row_limit.unwrap_or(MAX_RESULT_ROWS).min(MAX_RESULT_ROWS);
     let results = if req.split {
-        run_script(&s.client, &req.sql, limit, req.stop_on_error).await?
+        run_script(&s.client, &req.sql, limit, req.stop_on_error, s.supports_prepare).await?
     } else {
-        run_statement(&s.client, req.sql.trim(), limit).await?
+        run_statement(&s.client, req.sql.trim(), limit, s.supports_prepare).await?
     };
     if req.record {
         for r in &results {
@@ -48,7 +48,7 @@ pub async fn run_query(state: State<'_, AppState>, req: RunQueryRequest) -> AppR
 pub async fn execute(state: State<'_, AppState>, session_id: String, sql: String) -> AppResult<u64> {
     let s = state.sessions.get(&session_id).await?;
     let _guard = s.exec_lock.lock().await;
-    let results = run_statement(&s.client, sql.trim(), 1).await?;
+    let results = run_statement(&s.client, sql.trim(), 1, false).await?;
     let mut affected = 0u64;
     for r in results {
         if let Some(e) = r.error {

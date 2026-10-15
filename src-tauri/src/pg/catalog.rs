@@ -6,13 +6,14 @@ use crate::error::AppResult;
 use crate::model::*;
 use crate::pg::sqlgen::{qualified, quote_ident};
 use std::collections::HashMap;
+use tokio_postgres::types::Type;
 use tokio_postgres::Client;
 
 const REGCLASS: &str = "(quote_ident($1::text) || '.' || quote_ident($2::text))::regclass";
 
 pub async fn list_databases(client: &Client) -> AppResult<Vec<String>> {
     let rows = client
-        .query("SELECT datname::text FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY 1", &[])
+        .query_typed("SELECT datname::text FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY 1", &[])
         .await?;
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
@@ -23,7 +24,7 @@ pub async fn list_schemas(client: &Client, show_system: bool) -> AppResult<Vec<S
     } else {
         "SELECT nspname::text FROM pg_catalog.pg_namespace WHERE nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND nspname NOT LIKE 'pg_temp_%' AND nspname NOT LIKE 'pg_toast_temp_%' ORDER BY (nspname = 'public') DESC, 1"
     };
-    let rows = client.query(sql, &[]).await?;
+    let rows = client.query_typed(sql, &[]).await?;
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
@@ -40,12 +41,12 @@ fn relkind_name(k: &str) -> &'static str {
 
 pub async fn list_items(client: &Client, schema: &str, version_num: i32) -> AppResult<SchemaListing> {
     let rows = client
-        .query(
+        .query_typed(
             "SELECT c.relname::text, c.relkind::text, obj_description(c.oid, 'pg_class'), c.reltuples::bigint, \
              pg_total_relation_size(c.oid), pg_table_size(c.oid), pg_indexes_size(c.oid), pg_get_userbyid(c.relowner)::text \
              FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
              WHERE n.nspname = $1 AND c.relkind IN ('r','v','m','f','p') ORDER BY c.relname",
-            &[&schema],
+            &[(&schema, Type::TEXT)],
         )
         .await?;
     let items = rows
@@ -80,7 +81,7 @@ pub async fn list_items(client: &Client, schema: &str, version_num: i32) -> AppR
          pg_get_userbyid(p.proowner)::text, obj_description(p.oid, 'pg_proc') \
          FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 ORDER BY p.proname"
     };
-    let frows = client.query(fn_sql, &[&schema]).await?;
+    let frows = client.query_typed(fn_sql, &[(&schema, Type::TEXT)]).await?;
     let functions = frows
         .iter()
         .map(|r| FunctionItem {
@@ -96,12 +97,12 @@ pub async fn list_items(client: &Client, schema: &str, version_num: i32) -> AppR
 
     let sequences = if version_num >= 100000 {
         let srows = client
-            .query(
+            .query_typed(
                 "SELECT s.sequencename::text, s.start_value::text, s.min_value::text, s.max_value::text, s.increment_by::text, \
                  s.last_value::text, s.cache_size::text, \
                  obj_description((quote_ident(s.schemaname) || '.' || quote_ident(s.sequencename))::regclass, 'pg_class') \
                  FROM pg_sequences s WHERE s.schemaname = $1 ORDER BY 1",
-                &[&schema],
+                &[(&schema, Type::TEXT)],
             )
             .await?;
         srows
@@ -127,7 +128,7 @@ pub async fn list_items(client: &Client, schema: &str, version_num: i32) -> AppR
 
 async fn enum_values(client: &Client) -> AppResult<HashMap<u32, Vec<String>>> {
     let rows = client
-        .query(
+        .query_typed(
             "SELECT t.oid, e.enumlabel::text FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid ORDER BY t.oid, e.enumsortorder",
             &[],
         )
@@ -155,7 +156,7 @@ pub async fn primary_key(client: &Client, schema: &str, table: &str) -> AppResul
         "SELECT a.attname::text FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) \
          WHERE i.indrelid = {REGCLASS} AND i.indisprimary ORDER BY array_position(i.indkey, a.attnum)"
     );
-    let rows = client.query(&sql, &[&schema, &table]).await?;
+    let rows = client.query_typed(&sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)]).await?;
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
@@ -171,7 +172,7 @@ pub async fn foreign_keys(client: &Client, schema: &str, table: &str) -> AppResu
          FROM pg_constraint c JOIN pg_class pc ON pc.oid = c.confrelid JOIN pg_namespace pn ON pn.oid = pc.relnamespace \
          WHERE c.contype = 'f' AND c.conrelid = {REGCLASS} ORDER BY c.conname"
     );
-    let rows = client.query(&sql, &[&schema, &table]).await?;
+    let rows = client.query_typed(&sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)]).await?;
     Ok(rows
         .iter()
         .map(|r| ForeignKeyInfo {
@@ -203,7 +204,7 @@ pub async fn indexes(client: &Client, schema: &str, table: &str, version_num: i3
          FROM pg_index i JOIN pg_class ix ON ix.oid = i.indexrelid JOIN pg_am am ON am.oid = ix.relam \
          WHERE i.indrelid = {REGCLASS} ORDER BY i.indisprimary DESC, ix.relname"
     );
-    let rows = client.query(&sql, &[&schema, &table]).await?;
+    let rows = client.query_typed(&sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)]).await?;
     Ok(rows
         .iter()
         .map(|r| {
@@ -242,7 +243,7 @@ pub async fn table_structure(client: &Client, schema: &str, table: &str, kind: &
          JOIN pg_type t ON t.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
          WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum"
     );
-    let rows = client.query(&sql, &[&schema, &table]).await?;
+    let rows = client.query_typed(&sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)]).await?;
     let enums = enum_values(client).await?;
     let pk = primary_key(client, schema, table).await.unwrap_or_default();
     let fks = foreign_keys(client, schema, table).await.unwrap_or_default();
@@ -286,7 +287,7 @@ pub async fn table_structure(client: &Client, schema: &str, table: &str, kind: &
         "SELECT conname::text, pg_get_constraintdef(oid) FROM pg_constraint WHERE contype = 'c' AND conrelid = {REGCLASS} ORDER BY conname"
     );
     let checks = client
-        .query(&checks_sql, &[&schema, &table])
+        .query_typed(&checks_sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)])
         .await
         .map(|rows| rows.iter().map(|r| CheckConstraint { name: r.get(0), condition: r.get(1) }).collect())
         .unwrap_or_default();
@@ -295,7 +296,7 @@ pub async fn table_structure(client: &Client, schema: &str, table: &str, kind: &
         "SELECT t.tgname::text, pg_get_triggerdef(t.oid) FROM pg_trigger t WHERE t.tgrelid = {REGCLASS} AND NOT t.tgisinternal ORDER BY t.tgname"
     );
     let triggers = client
-        .query(&trig_sql, &[&schema, &table])
+        .query_typed(&trig_sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)])
         .await
         .map(|rows| {
             rows.iter()
@@ -321,7 +322,7 @@ pub async fn table_structure(client: &Client, schema: &str, table: &str, kind: &
 
     let comment_sql = format!("SELECT obj_description({REGCLASS}, 'pg_class')");
     let comment: Option<String> = client
-        .query_one(&comment_sql, &[&schema, &table])
+        .query_typed_one(&comment_sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)])
         .await
         .ok()
         .and_then(|r| r.get(0));
@@ -342,7 +343,7 @@ pub async fn table_structure(client: &Client, schema: &str, table: &str, kind: &
 
 pub async fn estimated_rows(client: &Client, schema: &str, table: &str) -> AppResult<Option<i64>> {
     let sql = format!("SELECT reltuples::bigint FROM pg_class WHERE oid = {REGCLASS}");
-    let row = client.query_opt(&sql, &[&schema, &table]).await?;
+    let row = client.query_typed_opt(&sql, &[(&schema, Type::TEXT), (&table, Type::TEXT)]).await?;
     Ok(row.map(|r| r.get::<_, i64>(0)).filter(|n| *n >= 0))
 }
 
@@ -352,17 +353,17 @@ pub async fn object_ddl(client: &Client, schema: &str, name: &str, kind: &str, v
     match kind {
         "view" | "matview" => {
             let sql = format!("SELECT pg_get_viewdef({REGCLASS}, true)");
-            let row = client.query_one(&sql, &[&schema, &name]).await?;
+            let row = client.query_typed_one(&sql, &[(&schema, Type::TEXT), (&name, Type::TEXT)]).await?;
             let body: String = row.get(0);
             let kw = if kind == "matview" { "MATERIALIZED VIEW" } else { "VIEW" };
             Ok(format!("CREATE OR REPLACE {kw} {rel} AS\n{body}"))
         }
         "function" => {
             let row = client
-                .query_one(
+                .query_typed_one(
                     "SELECT pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
                      WHERE n.nspname = $1 AND p.proname = $2 LIMIT 1",
-                    &[&schema, &name],
+                    &[(&schema, Type::TEXT), (&name, Type::TEXT)],
                 )
                 .await?;
             Ok(row.get(0))
@@ -437,7 +438,7 @@ pub async fn object_ddl(client: &Client, schema: &str, name: &str, kind: &str, v
 
 pub async fn processes(client: &Client) -> AppResult<Vec<ProcessInfo>> {
     let rows = client
-        .query(
+        .query_typed(
             "SELECT pid, usename::text, datname::text, application_name::text, client_addr::text, state::text, \
              wait_event::text, query_start::text, query::text FROM pg_stat_activity \
              WHERE pid <> pg_backend_pid() ORDER BY state = 'active' DESC, query_start DESC NULLS LAST",

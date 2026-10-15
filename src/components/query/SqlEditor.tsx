@@ -9,25 +9,25 @@ import { searchKeymap, highlightSelectionMatches, search } from "@codemirror/sea
 import { tags as t } from "@lezer/highlight";
 import { statementAt } from "@/lib/sql";
 
-/** Jade Dark editor colours (from TablePlus' theme JSON). */
+/** Editor colours; every value is a CSS variable so themes (src/lib/theme.ts) restyle it live. */
 const theme = EditorView.theme({
   "&": { backgroundColor: "var(--content-bg)", color: "var(--ed-ident)", height: "100%" },
-  ".cm-content": { caretColor: "#fff", fontFamily: "var(--font-mono)" },
-  ".cm-cursor": { borderLeftColor: "#fff" },
+  ".cm-content": { caretColor: "var(--caret)", fontFamily: "var(--font-mono)" },
+  ".cm-cursor": { borderLeftColor: "var(--caret)" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "var(--ed-selection) !important" },
   ".cm-activeLine": { backgroundColor: "var(--ed-current)" },
   ".cm-activeLineGutter": { backgroundColor: "var(--ed-current)" },
   ".cm-gutters": { backgroundColor: "var(--content-bg)", color: "var(--text-dim)", border: "none" },
-  ".cm-matchingBracket": { backgroundColor: "#8f2f3180", outline: "none" },
-  ".cm-tooltip": { backgroundColor: "#0f2f3a", border: "1px solid var(--control-border)", color: "var(--text)" },
-  ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "var(--tab-selected)", color: "#fff" },
+  ".cm-matchingBracket": { backgroundColor: "var(--ed-bracket-match)", outline: "none" },
+  ".cm-tooltip": { backgroundColor: "var(--menu-bg)", border: "1px solid var(--control-border)", color: "var(--text)" },
+  ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "var(--tab-selected)", color: "var(--on-accent)" },
   ".cm-panels": { backgroundColor: "var(--app-bg)", color: "var(--text)" },
   ".cm-panels input": { background: "var(--control-bg)", color: "var(--text)", border: "1px solid var(--control-border)" },
-  ".cm-searchMatch": { backgroundColor: "#8b682680" },
-  ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#8b6826" },
-  ".cm-selectionMatch": { backgroundColor: "#004f6c80" },
-  ".cm-current-statement": { backgroundColor: "#00374580" },
-  ".cm-error-line": { backgroundColor: "#8f2f3160" },
+  ".cm-searchMatch": { backgroundColor: "var(--ed-search-match)" },
+  ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--ed-search-match-current)" },
+  ".cm-selectionMatch": { backgroundColor: "var(--ed-selection-match)" },
+  ".cm-current-statement": { backgroundColor: "var(--ed-current-statement)" },
+  ".cm-error-line": { backgroundColor: "var(--ed-error-line)" },
 }, { dark: true });
 
 const highlight = HighlightStyle.define([
@@ -37,9 +37,9 @@ const highlight = HighlightStyle.define([
   { tag: [t.number, t.integer, t.float, t.bool, t.null], color: "var(--ed-number)" },
   { tag: [t.comment, t.lineComment, t.blockComment], color: "var(--ed-comment)", fontStyle: "italic" },
   { tag: [t.function(t.variableName), t.function(t.propertyName), t.standard(t.name)], color: "var(--ed-function)" },
-  { tag: [t.typeName, t.className], color: "#7cb342" },
+  { tag: [t.typeName, t.className], color: "var(--ed-type)" },
   { tag: [t.variableName, t.propertyName, t.name], color: "var(--ed-ident)" },
-  { tag: t.punctuation, color: "#9aa5a8" },
+  { tag: t.punctuation, color: "var(--ed-punct)" },
 ]);
 
 export interface SqlEditorProps {

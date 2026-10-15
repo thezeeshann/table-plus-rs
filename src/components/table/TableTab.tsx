@@ -31,7 +31,9 @@ export function TableTab({ tab }: { tab: Tab; active: boolean }) {
 
   const [structure, setStructure] = useState<TableStructure | null>(null);
   const [data, setData] = useState<FetchRowsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Starts true for relations: the first fetch is fired from an effect, and one frame of "Table is empty" would flash.
+  const [loading, setLoading] = useState(kind === "table" || kind === "partitioned" || kind === "view" || kind === "matview" || kind === "foreign");
+  const setTabBusy = useApp((s) => s.setTabBusy);
   const [error, setError] = useState<string | null>(null);
   const [limit, setLimit] = useState(session.limitRowsReturned || 300);
   const [offset, setOffset] = useState(0);
@@ -80,6 +82,9 @@ export function TableTab({ tab }: { tab: Tab; active: boolean }) {
   }, [session.sessionId, schema, name, kind, limit, offset, sort, appliedFilters, quick, isRelation]);
 
   useEffect(() => { loadStructure(); load(); }, [schema, name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { setTabBusy(tab.id, loading); }, [loading, tab.id, setTabBusy]);
+  useEffect(() => () => setTabBusy(tab.id, false), [tab.id, setTabBusy]);
 
   const pendingCount = edits.size + inserted.length + deleted.size;
   useEffect(() => { setDirty(tab.id, pendingCount > 0); }, [pendingCount, tab.id, setDirty]);
@@ -319,8 +324,8 @@ export function TableTab({ tab }: { tab: Tab; active: boolean }) {
           {pendingCount > 0 && (
             <div className="flex items-center gap-2 px-3 h-8 bg-warn text-white text-xs shrink-0">
               <span className="flex-1">{pendingCount} pending change{pendingCount === 1 ? "" : "s"} · {editingCell ? "editing" : "not saved"}</span>
-              <button className="btn !py-0 !bg-[#0b2127]" onClick={previewSql}>Preview ({mod}⇧P)</button>
-              <button className="btn !py-0 !bg-[#0b2127]" onClick={discard}>Discard</button>
+              <button className="btn !py-0 !bg-[var(--app-bg)]" onClick={previewSql}>Preview ({mod}⇧P)</button>
+              <button className="btn !py-0 !bg-[var(--app-bg)]" onClick={discard}>Discard</button>
               <button className="btn btn-primary !py-0" onClick={commit}>Commit ({mod}S)</button>
             </div>
           )}

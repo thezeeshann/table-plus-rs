@@ -226,7 +226,7 @@ export function DataGrid(props: DataGridProps) {
                 onClick={(e) => onSort?.(col.name, e.shiftKey)}
                 onContextMenu={(e) => { e.preventDefault(); onHeaderContextMenu?.(e, c); }}
               >
-                {col.pk && <Key size={11} className="text-[#f9b746] shrink-0" />}
+                {col.pk && <Key size={11} className="text-[var(--key-color)] shrink-0" />}
                 <span className="truncate-1 flex-1">{col.name}</span>
                 {s && (s.direction === "asc" ? <ArrowUp size={11} className="shrink-0" /> : <ArrowDown size={11} className="shrink-0" />)}
                 <span className="text-[10px] text-dim font-normal truncate-1 max-w-[80px]">{col.type}</span>
@@ -278,7 +278,7 @@ export function DataGrid(props: DataGridProps) {
                       {isEditing ? (
                         <textarea
                           ref={editorRef}
-                          className="absolute inset-0 w-full h-full !rounded-none !border-accent mono resize-none !px-[7px] !py-0 leading-6 z-20 bg-[#0b2127]"
+                          className="absolute inset-0 w-full h-full !rounded-none !border-accent mono resize-none !px-[7px] !py-0 leading-6 z-20 bg-[var(--app-bg)]"
                           value={editing.value}
                           onChange={(e) => setEditing({ ...editing, value: e.target.value })}
                           onBlur={() => commitEdit()}

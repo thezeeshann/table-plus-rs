@@ -47,7 +47,7 @@ export function Workspace() {
               </div>
             )}
             {tabs.map((t) => (
-              <div key={t.id} className="absolute inset-0 flex flex-col" style={{ display: t.id === activeTabId ? "flex" : "none" }}>
+              <div key={t.type === "table" ? `${t.id}:${t.schema}.${t.name}` : t.id} className="absolute inset-0 flex flex-col" style={{ display: t.id === activeTabId ? "flex" : "none" }}>
                 {t.type === "table" && <TableTab tab={t} active={t.id === activeTabId} />}
                 {t.type === "query" && <QueryTab tab={t} active={t.id === activeTabId} />}
                 {t.type === "processes" && <ProcessListTab tab={t} active={t.id === activeTabId} />}

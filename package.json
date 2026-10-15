@@ -1,5 +1,5 @@
 {
-  "name": "tusk",
+  "name": "table-plus-rs",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node --test src/lib/theme.test.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

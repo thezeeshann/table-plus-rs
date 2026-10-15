@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ipc, errorMessage } from "@/lib/ipc";
+import * as theme from "@/lib/theme";
 import type {
   AppSettings, ConnectionConfig, ConnectionGroup, FavoriteQuery, HistoryEntry,
   ItemKind, SchemaListing, SessionInfo,
@@ -65,9 +66,14 @@ interface AppStore {
   history: HistoryEntry[];
   toasts: Toast[];
   tabActions: Record<string, TabActions>;
+  /** Tab ids with a fetch in flight; drives the toolbar's loading fill. */
+  busyTabs: Record<string, true>;
   connectionForm: { open: boolean; config: ConnectionConfig | null };
   openDatabaseDialog: boolean;
   settingsDialog: boolean;
+  /** Where the live theme came from, and any --theme / $TABLE_PLUS_RS_THEME request that overrides the saved one. */
+  themeSource: theme.Source;
+  themeOverride: { flag: string | null; env: string | null };
   createTableDialog: boolean;
   renameDialog: { open: boolean; schema: string; name: string; kind: ItemKind } | null;
 
@@ -75,6 +81,8 @@ interface AppStore {
   loadConnections: () => Promise<void>;
   loadFavorites: () => Promise<void>;
   saveSettings: (s: Partial<AppSettings>) => Promise<void>;
+  /** Persist `id` as the saved theme and, unless a launch override is active, switch to it. */
+  saveTheme: (id: string) => Promise<void>;
   connect: (connectionId: string, database?: string) => Promise<void>;
   disconnect: () => Promise<void>;
   reconnect: () => Promise<void>;
@@ -91,6 +99,7 @@ interface AppStore {
   renameTab: (id: string, title: string) => void;
   updateTab: (id: string, patch: Partial<Tab>) => void;
   setDirty: (id: string, dirty: boolean) => void;
+  setTabBusy: (id: string, busy: boolean) => void;
   registerTabActions: (id: string, actions: TabActions) => void;
   toast: (kind: Toast["kind"], text: string) => void;
   dismissToast: (id: number) => void;
@@ -111,7 +120,7 @@ let tabSeq = 1;
 export const defaultSettings: AppSettings = {
   defaultLimit: 300,
   estimateCountThreshold: 100000,
-  theme: "jade-dark",
+  theme: "default",
   editorFontSize: 13,
   historyKeepDays: 0,
   autoCloseBrackets: true,
@@ -140,9 +149,12 @@ export const useApp = create<AppStore>((set, get) => ({
   history: [],
   toasts: [],
   tabActions: {},
+  busyTabs: {},
   connectionForm: { open: false, config: null },
   openDatabaseDialog: false,
   settingsDialog: false,
+  themeSource: "default",
+  themeOverride: { flag: null, env: null },
   createTableDialog: false,
   renameDialog: null,
 
@@ -153,6 +165,22 @@ export const useApp = create<AppStore>((set, get) => ({
     } catch (e) {
       console.warn(e);
     }
+    let override = { flag: null as string | null, env: null as string | null };
+    try { override = await ipc.launchTheme(); } catch (e) { console.warn(e); }
+    const r = theme.resolve(override.flag, override.env, get().settings.theme);
+    if (r.ok) {
+      theme.setActive(r.choice.index);
+      set({ themeSource: r.choice.source, themeOverride: override });
+      if (r.choice.warning) get().toast("warn", r.choice.warning);
+    } else {
+      // A bad --theme is an error, but it must never lock the user out of the app:
+      // report it and carry on with the saved/default theme.
+      get().toast("err", r.error);
+      const fallback = theme.resolve(null, override.env, get().settings.theme);
+      if (fallback.ok) { theme.setActive(fallback.choice.index); set({ themeSource: fallback.choice.source }); }
+      set({ themeOverride: override });
+    }
+    theme.writeCached(theme.normalize(get().settings.theme));
     await Promise.all([get().loadConnections(), get().loadFavorites()]);
   },
 
@@ -181,6 +209,23 @@ export const useApp = create<AppStore>((set, get) => ({
     } catch (e) {
       get().toast("err", errorMessage(e));
     }
+  },
+
+  saveTheme: async (id) => {
+    const { themeOverride } = get();
+    await get().saveSettings({ theme: id });
+    theme.writeCached(id);
+    const overridden = themeOverride.flag?.trim() || themeOverride.env?.trim();
+    if (overridden) {
+      const by = themeOverride.flag?.trim() ? "--theme" : "$TABLE_PLUS_RS_THEME";
+      // The picker previewed other themes; put the override back.
+      theme.setActive(theme.find((themeOverride.flag?.trim() ? themeOverride.flag : themeOverride.env) ?? "") ?? 0);
+      get().toast("ok", `Theme saved. ${by} is overriding it for this run.`);
+      return;
+    }
+    theme.setActive(theme.find(id) ?? 0);
+    set({ themeSource: "saved" });
+    get().toast("ok", `Theme set to ${theme.THEMES[theme.find(id) ?? 0].name}.`);
   },
 
   connect: async (connectionId, database) => {
@@ -226,8 +271,8 @@ export const useApp = create<AppStore>((set, get) => ({
   disconnect: async () => {
     const { session } = get();
     if (session) await ipc.closeSession(session.sessionId).catch(() => {});
-    set({ session: null, connection: null, screen: "welcome", tabs: [], activeTabId: null, listing: null, tabActions: {} });
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().setTitle("Tusk")).catch(() => {});
+    set({ session: null, connection: null, screen: "welcome", tabs: [], activeTabId: null, listing: null, tabActions: {}, busyTabs: {} });
+    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().setTitle("table-plus-rs")).catch(() => {});
     get().loadConnections();
   },
 
@@ -336,7 +381,8 @@ export const useApp = create<AppStore>((set, get) => ({
     let active = activeTabId;
     if (activeTabId === id) active = next[Math.min(idx, next.length - 1)]?.id ?? null;
     const { [id]: _, ...rest } = tabActions;
-    set({ tabs: next, activeTabId: active, tabActions: rest });
+    const { [id]: __, ...busy } = get().busyTabs;
+    set({ tabs: next, activeTabId: active, tabActions: rest, busyTabs: busy });
   },
 
   closeOtherTabs: (id) => {
@@ -351,6 +397,13 @@ export const useApp = create<AppStore>((set, get) => ({
   setDirty: (id, dirty) => {
     const t = get().tabs.find((x) => x.id === id);
     if (t && !!t.dirty !== dirty) set({ tabs: get().tabs.map((x) => (x.id === id ? { ...x, dirty, pinned: x.pinned || dirty } : x)) });
+  },
+  setTabBusy: (id, busy) => {
+    const cur = get().busyTabs;
+    if (!!cur[id] === busy) return;
+    if (busy) { set({ busyTabs: { ...cur, [id]: true } }); return; }
+    const { [id]: _, ...rest } = cur;
+    set({ busyTabs: rest });
   },
   registerTabActions: (id, actions) => set({ tabActions: { ...get().tabActions, [id]: actions } }),
 

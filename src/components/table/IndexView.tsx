@@ -41,7 +41,7 @@ export function IndexView({ tab, structure, onChanged }: { tab: Tab; structure: 
   }, [tab.id, ops.length, structure, dropped, added]);
 
   const th = "text-left text-dim font-semibold px-2 py-1 border-b border-border sticky top-0 bg-content";
-  const td = "px-2 py-1 border-b border-[#00000040] mono";
+  const td = "px-2 py-1 border-b border-[var(--grid-line)] mono";
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex-1 overflow-auto min-h-0">
@@ -50,7 +50,7 @@ export function IndexView({ tab, structure, onChanged }: { tab: Tab; structure: 
           <tbody>
             {structure.indexes.map((ix) => (
               <tr key={ix.name} className={dropped.has(ix.name) ? "bg-deleted/60 line-through" : "hover:bg-tab-hover/40"} title={ix.definition}>
-                <td className={td}>{ix.isPrimary && <span className="text-[#f9b746] mr-1">PK</span>}{ix.name}</td>
+                <td className={td}>{ix.isPrimary && <span className="text-[var(--key-color)] mr-1">PK</span>}{ix.name}</td>
                 <td className={td}>{ix.algorithm}</td>
                 <td className={`${td} text-center`}>{ix.isUnique ? "✓" : ""}</td>
                 <td className={td}>{ix.columns.join(", ")}</td>
@@ -84,8 +84,8 @@ export function IndexView({ tab, structure, onChanged }: { tab: Tab; structure: 
       {ops.length > 0 && (
         <div className="flex items-center gap-2 px-3 h-8 bg-warn text-white text-xs shrink-0">
           <span className="flex-1">{ops.length} pending index change{ops.length === 1 ? "" : "s"}</span>
-          <button className="btn !py-0 !bg-[#0b2127]" onClick={previewSql}>Preview</button>
-          <button className="btn !py-0 !bg-[#0b2127]" onClick={discard}>Discard</button>
+          <button className="btn !py-0 !bg-[var(--app-bg)]" onClick={previewSql}>Preview</button>
+          <button className="btn !py-0 !bg-[var(--app-bg)]" onClick={discard}>Discard</button>
           <button className="btn btn-primary !py-0" onClick={commit}>Commit ({mod}S)</button>
         </div>
       )}

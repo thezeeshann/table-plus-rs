@@ -86,7 +86,7 @@ export function StructureView({ tab, structure, onChanged }: { tab: Tab; structu
   ]);
 
   const th = "text-left text-dim font-semibold px-2 py-1 border-b border-border sticky top-0 bg-content";
-  const td = "px-2 py-0.5 border-b border-[#00000040]";
+  const td = "px-2 py-0.5 border-b border-[var(--grid-line)]";
   const input = (value: string, onChange: (v: string) => void, extra?: string, list?: string) => (
     <input type="text" list={list} className={`w-full !py-[2px] !bg-transparent !border-transparent hover:!border-border focus:!border-accent mono ${extra ?? ""}`} value={value} onChange={(e) => onChange(e.target.value)} disabled={!editable} />
   );
@@ -106,7 +106,7 @@ export function StructureView({ tab, structure, onChanged }: { tab: Tab; structu
               return (
                 <tr key={c.name} className={`${isDropped ? "bg-deleted/60 line-through" : changed ? "bg-modified/40" : ""} hover:bg-tab-hover/40`} onContextMenu={(e) => colMenu(e, c)}>
                   <td className={`${td} text-dim text-right`}>{i + 1}</td>
-                  <td className={td}><div className="flex items-center gap-1">{c.isPrimaryKey && <Key size={11} className="text-[#f9b746]" />}{input(d.name, (v) => setDraft(c, { name: v }))}</div></td>
+                  <td className={td}><div className="flex items-center gap-1">{c.isPrimaryKey && <Key size={11} className="text-[var(--key-color)]" />}{input(d.name, (v) => setDraft(c, { name: v }))}</div></td>
                   <td className={td}>{input(d.type, (v) => setDraft(c, { type: v }), undefined, "pg-types-list")}</td>
                   <td className={`${td} text-center`}><input type="checkbox" checked={d.nullable} disabled={!editable || c.isPrimaryKey} onChange={(e) => setDraft(c, { nullable: e.target.checked })} /></td>
                   <td className={td}>{c.isIdentity ? <span className="text-dim italic">identity</span> : c.isGenerated ? <span className="text-dim italic" title={c.generationExpression ?? ""}>generated</span> : input(d.default, (v) => setDraft(c, { default: v }))}</td>
@@ -165,8 +165,8 @@ export function StructureView({ tab, structure, onChanged }: { tab: Tab; structu
       {ops.length > 0 && (
         <div className="flex items-center gap-2 px-3 h-8 bg-warn text-white text-xs shrink-0">
           <span className="flex-1">{ops.length} pending DDL change{ops.length === 1 ? "" : "s"}</span>
-          <button className="btn !py-0 !bg-[#0b2127]" onClick={previewSql}>Preview ({mod}⇧P)</button>
-          <button className="btn !py-0 !bg-[#0b2127]" onClick={discard}>Discard</button>
+          <button className="btn !py-0 !bg-[var(--app-bg)]" onClick={previewSql}>Preview ({mod}⇧P)</button>
+          <button className="btn !py-0 !bg-[var(--app-bg)]" onClick={discard}>Discard</button>
           <button className="btn btn-primary !py-0" onClick={commit}>Commit ({mod}S)</button>
         </div>
       )}

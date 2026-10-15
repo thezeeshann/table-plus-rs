@@ -81,7 +81,7 @@ export function ConnectionForm() {
       footer={
         <>
           <div className="flex-1 flex items-center gap-2 text-xs selectable">
-            {testResult && <span className={testResult.ok ? "text-[#8bd36a]" : "text-[#ff7b7b]"}>{testResult.text}</span>}
+            {testResult && <span className={testResult.ok ? "text-[var(--success-text)]" : "text-[var(--danger-text)]"}>{testResult.text}</span>}
           </div>
           <button className="btn" onClick={test} disabled={!valid || testing}>{testing ? "Testing..." : "Test"}</button>
           <button className="btn" onClick={async () => { if (await save()) hide(); }} disabled={!valid || saving}>Save</button>
@@ -105,7 +105,7 @@ export function ConnectionForm() {
       </Field>
       <Field label="Tag">
         <select className="flex-1" value={cfg.environment} onChange={(e) => patch({ environment: e.target.value })}>
-          <option value="">None</option><option value="Local">Local</option><option value="Testing">Testing</option><option value="Staging">Staging</option><option value="Production">Production</option>
+          <option value="">None</option><option value="Local">Local</option><option value="Development">Development</option><option value="Testing">Testing</option><option value="Staging">Staging</option><option value="Production">Production</option>
         </select>
         <select className="flex-1" value={cfg.groupId ?? ""} onChange={(e) => patch({ groupId: e.target.value || null })}>
           <option value="">No group</option>
@@ -121,7 +121,7 @@ export function ConnectionForm() {
         <input type="text" className="flex-1 mono" value={cfg.user} onChange={(e) => patch({ user: e.target.value })} />
       </Field>
       <Field label="Password">
-        <input type="password" className="flex-1 mono" value={cfg.password ?? ""} onChange={(e) => patch({ password: e.target.value })} placeholder={form.config ? "(unchanged – stored in Keychain)" : ""} />
+        <input type="password" className="flex-1 mono" value={cfg.password ?? ""} onChange={(e) => patch({ password: e.target.value })} placeholder={form.config ? "(unchanged)" : ""} />
       </Field>
       <Field label="Database">
         <input type="text" className="flex-1 mono" value={cfg.database} onChange={(e) => patch({ database: e.target.value })} />
