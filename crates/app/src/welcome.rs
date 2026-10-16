@@ -446,5 +446,7 @@ mod tests {
         assert_eq!((q.host.as_str(), q.port), ("localhost", 5432));
         assert!(parse_url("mysql://x").is_none());
         assert!(parse_url("postgresql://@/db").is_none());
+        let r = parse_url("postgresql://u:-ab%29c%5Dd%7Ce%21f@db.example.com:5432/x").unwrap();
+        assert_eq!(r.password.as_deref(), Some("-ab)c]d|e!f"));
     }
 }
