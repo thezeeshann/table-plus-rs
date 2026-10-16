@@ -295,6 +295,13 @@ impl TableTab {
         }
     }
 
+    /// Toolbar "+": same as Cmd+I.
+    pub fn request_add_row(&mut self) {
+        if self.editable() && self.view == View::Data {
+            self.add_row();
+        }
+    }
+
     fn add_row(&mut self) {
         let ncols = self.data.as_ref().map(|d| d.columns.len()).unwrap_or(0);
         if ncols == 0 {
@@ -556,69 +563,82 @@ impl TableTab {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
 
-        // ---- bottom bar
-        egui::Panel::bottom(egui::Id::new(("tbl_bottom", &self.schema, &self.name))).exact_size(38.0).frame(
-            egui::Frame::new().fill(c32(&colors.sidebar_bg)).inner_margin(egui::Margin::symmetric(10, 6)),
+        // ---- bottom bar: view switch, + Row, quick filter, status, filters, page size, pager
+        egui::Panel::bottom(egui::Id::new(("tbl_bottom", &self.schema, &self.name))).exact_size(40.0).frame(
+            egui::Frame::new().fill(c32(&colors.content_bg)).inner_margin(egui::Margin::symmetric(8, 6)),
         ).show(ui, |ui| {
-            ui.horizontal(|ui| {
+            let r = ui.max_rect();
+            ui.painter().line_segment([r.left_top() - egui::vec2(8.0, 6.0), r.right_top() + egui::vec2(8.0, -6.0)], egui::Stroke::new(1.0, c32(&colors.control_border)));
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
                 let mut v = self.view;
                 let tabs: &[(View, &str)] = &[(View::Data, "Data"), (View::Structure, "Structure"), (View::Index, "Index"), (View::Ddl, "DDL")];
                 if widgets::segmented(ui, &colors, &mut v, tabs) {
                     self.set_view(cx, v);
                 }
                 if self.view == View::Data {
-                    if self.editable() && widgets::small_button(ui, "+ Row").clicked() {
+                    if self.editable() && widgets::button(ui, "+ Row").clicked() {
                         self.add_row();
                     }
-                    let active = self.active_filters().len();
-                    let label = if active > 0 { format!("Filters ({active})") } else { "Filters".to_string() };
-                    if widgets::small_button(ui, &label).clicked() {
-                        self.filters_open = !self.filters_open;
+                    let r = ui.add(egui::TextEdit::singleline(&mut self.quick).hint_text("Quick filter (all columns)").desired_width(210.0).margin(egui::Margin::symmetric(8, 4)));
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                        self.offset = 0;
+                        self.load(cx);
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
                     if self.view == View::Data {
+                        if widgets::button(ui, "⟳").on_hover_text("Reload (Cmd+R)").clicked() {
+                            self.load(cx);
+                        }
                         self.pager(ui, cx);
+                        let mut limit = self.limit;
+                        egui::ComboBox::from_id_salt(("page_size", &self.name)).width(56.0).selected_text(limit.to_string()).show_ui(ui, |ui| {
+                            for n in [100u32, 300, 500, 1000] {
+                                ui.selectable_value(&mut limit, n, n.to_string());
+                            }
+                        });
+                        if limit != self.limit {
+                            self.limit = limit;
+                            self.offset = 0;
+                            self.load(cx);
+                        }
+                        let active = self.active_filters().len();
+                        let label = if active > 0 { format!("Filters ({active})") } else { "Filters".to_string() };
+                        if widgets::button(ui, &label).clicked() {
+                            self.filters_open = !self.filters_open;
+                        }
                     }
                 });
             });
         });
 
-        // ---- staged strip + filters
-        if self.view == View::Data {
-            let strip = egui::Frame::new().fill(c32(&colors.sidebar_bg)).inner_margin(egui::Margin::symmetric(10, 6));
-            {
-                strip.show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+        // ---- staged-changes strip + filter rows (only when there is something to show)
+        if self.view == View::Data && (!self.staged.is_empty() || self.filters_open) {
+            let strip = egui::Frame::new().fill(c32(&colors.content_bg)).inner_margin(egui::Margin::symmetric(10, 6));
+            strip.show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if !self.staged.is_empty() {
                     ui.horizontal(|ui| {
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.quick).hint_text("Quick filter (all columns)…").desired_width(240.0));
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                            self.offset = 0;
-                            self.load(cx);
-                        }
-                        if widgets::small_button(ui, "Reload").clicked() {
-                            self.load(cx);
-                        }
+                        ui.label(RichText::new(format!("{} pending", self.staged.count())).color(c32(&colors.key_color)));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if !self.staged.is_empty() {
-                                if widgets::primary_button(ui, &colors, &format!("Commit ({})", self.staged.count()), self.commit.is_none()).clicked() {
-                                    self.commit_now(cx);
-                                }
-                                if widgets::button(ui, "Preview SQL").clicked() {
-                                    self.preview(cx);
-                                }
-                                if widgets::button(ui, "Discard").clicked() {
-                                    self.dialog = Some(Dialog::ConfirmDiscard);
-                                }
-                                ui.label(RichText::new(format!("{} pending", self.staged.count())).color(c32(&colors.key_color)));
+                            if widgets::primary_button(ui, &colors, &format!("Commit ({})", self.staged.count()), self.commit.is_none()).clicked() {
+                                self.commit_now(cx);
+                            }
+                            if widgets::button(ui, "Preview SQL").clicked() {
+                                self.preview(cx);
+                            }
+                            if widgets::button(ui, "Discard").clicked() {
+                                self.dialog = Some(Dialog::ConfirmDiscard);
                             }
                         });
                     });
-                    if self.filters_open {
-                        self.filter_rows(ui, cx);
-                    }
-                });
-            }
+                }
+                if self.filters_open {
+                    self.filter_rows(ui, cx);
+                }
+            });
         }
 
         // ---- main area

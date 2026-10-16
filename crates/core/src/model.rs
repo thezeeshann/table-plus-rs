@@ -388,8 +388,6 @@ pub struct AppSettings {
     pub default_limit: u32,
     #[serde(default = "default_estimate_threshold")]
     pub estimate_count_threshold: i64,
-    #[serde(default = "default_theme")]
-    pub theme: String,
     #[serde(default = "default_font_size")]
     pub editor_font_size: u8,
     #[serde(default)]
@@ -400,7 +398,6 @@ pub struct AppSettings {
     pub last_connection_id: Option<String>,
 }
 fn default_estimate_threshold() -> i64 { 100_000 }
-fn default_theme() -> String { "default".into() }
 fn default_font_size() -> u8 { 13 }
 
 impl Default for AppSettings {
@@ -408,7 +405,6 @@ impl Default for AppSettings {
         Self {
             default_limit: default_limit(),
             estimate_count_threshold: default_estimate_threshold(),
-            theme: default_theme(),
             editor_font_size: default_font_size(),
             history_keep_days: 0,
             auto_close_brackets: true,

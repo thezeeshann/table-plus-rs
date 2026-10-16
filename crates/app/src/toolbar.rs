@@ -1,10 +1,9 @@
 //! Top toolbar. The centre status pill shows where you are and doubles as the loading
 //! indicator: while the active tab is busy it fills with the connection's own color.
 
-use eframe::egui::{self, epaint::Vertex, Align, Align2, Color32, CornerRadius, FontId, Layout, Mesh, Sense, Stroke, StrokeKind, Ui};
+use eframe::egui::{self, epaint::Vertex, Align, Align2, Color32, CornerRadius, Layout, Mesh, Sense, Stroke, StrokeKind, Ui};
 
 use crate::theme::{c32, conn_color, Colors};
-use crate::widgets;
 
 pub struct Data<'a> {
     pub colors: &'a Colors,
@@ -21,6 +20,7 @@ pub struct Data<'a> {
     pub alive: bool,
     pub reconnecting: bool,
     pub sidebar_open: bool,
+    pub mode: crate::sidebar::Mode,
 }
 
 #[derive(Default)]
@@ -33,6 +33,8 @@ pub struct Out {
     pub disconnect: bool,
     pub open_database: bool,
     pub reconnect: bool,
+    pub mode: Option<crate::sidebar::Mode>,
+    pub add_row: bool,
 }
 
 fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
@@ -42,69 +44,179 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 
 #[derive(Clone, Copy)]
 enum Icon {
-    SidebarOpen,
-    SidebarClosed,
+    Sidebar,
+    Database,
+    Star,
+    Clock,
+    Lock,
+    Terminal,
+    Reload,
     Plus,
+    Pulse,
+    Gear,
     Power,
-    Text(&'static str),
+}
+
+fn arc(c: egui::Pos2, r: f32, from_deg: f32, to_deg: f32) -> Vec<egui::Pos2> {
+    let n = 20;
+    (0..=n)
+        .map(|i| {
+            let a = (from_deg + (to_deg - from_deg) * i as f32 / n as f32).to_radians();
+            c + egui::vec2(a.cos(), a.sin()) * r
+        })
+        .collect()
 }
 
 fn paint_icon(p: &egui::Painter, c: egui::Pos2, icon: Icon, color: Color32) {
-    let st = Stroke::new(1.6, color);
+    let st = Stroke::new(1.4, color);
+    let v = egui::vec2;
     match icon {
-        Icon::SidebarOpen | Icon::SidebarClosed => {
-            let r = egui::Rect::from_center_size(c, egui::vec2(15.0, 12.0));
+        Icon::Sidebar => {
+            let r = egui::Rect::from_center_size(c, v(14.0, 12.0));
             p.rect_stroke(r, CornerRadius::same(2), st, StrokeKind::Inside);
-            let x = r.left() + 5.5;
+            let x = r.left() + 5.0;
             p.line_segment([egui::pos2(x, r.top()), egui::pos2(x, r.bottom())], st);
-            if matches!(icon, Icon::SidebarOpen) {
-                p.rect_filled(egui::Rect::from_min_max(r.min + egui::vec2(1.0, 1.0), egui::pos2(x - 0.5, r.bottom() - 1.0)), CornerRadius::ZERO, color.gamma_multiply(0.7));
-            }
         }
-        Icon::Plus => {
-            p.line_segment([c - egui::vec2(6.0, 0.0), c + egui::vec2(6.0, 0.0)], st);
-            p.line_segment([c - egui::vec2(0.0, 6.0), c + egui::vec2(0.0, 6.0)], st);
+        Icon::Database => {
+            let top = c + v(0.0, -4.5);
+            let ell = |y: f32, from: f32, to: f32| arc(c + v(0.0, y), 1.0, from, to);
+            let _ = ell;
+            let ellipse = |cy: f32, from: f32, to: f32| -> Vec<egui::Pos2> {
+                (0..=24).map(|i| {
+                    let a = (from + (to - from) * i as f32 / 24.0).to_radians();
+                    egui::pos2(c.x + a.cos() * 5.5, cy + a.sin() * 2.2)
+                }).collect()
+            };
+            p.add(egui::Shape::line(ellipse(top.y, 0.0, 360.0), st));
+            p.add(egui::Shape::line(ellipse(c.y, 0.0, 180.0), st));
+            p.add(egui::Shape::line(ellipse(c.y + 4.5, 0.0, 180.0), st));
+            p.line_segment([egui::pos2(c.x - 5.5, top.y), egui::pos2(c.x - 5.5, c.y + 4.5)], st);
+            p.line_segment([egui::pos2(c.x + 5.5, top.y), egui::pos2(c.x + 5.5, c.y + 4.5)], st);
         }
-        Icon::Power => {
-            let pts: Vec<egui::Pos2> = (0..=18)
+        Icon::Star => {
+            let pts: Vec<egui::Pos2> = (0..10)
                 .map(|i| {
-                    let a = (-60.0 + i as f32 * (300.0 / 18.0)).to_radians() - std::f32::consts::FRAC_PI_2 + 0.0;
-                    c + egui::vec2(a.cos(), a.sin()) * 6.0
+                    let r = if i % 2 == 0 { 6.5 } else { 2.8 };
+                    let a = (-90.0 + i as f32 * 36.0).to_radians();
+                    c + v(a.cos() * r, a.sin() * r + 0.5)
                 })
                 .collect();
-            p.add(egui::Shape::line(pts, st));
-            p.line_segment([c - egui::vec2(0.0, 7.0), c], st);
+            p.add(egui::Shape::closed_line(pts, st));
         }
-        Icon::Text(t) => {
-            p.text(c, Align2::CENTER_CENTER, t, FontId::proportional(14.0), color);
+        Icon::Clock => {
+            p.add(egui::Shape::line(arc(c, 6.0, 40.0, 340.0), st));
+            p.add(egui::Shape::line(vec![c + v(-6.0, -3.5), c + v(-6.0, -0.5), c + v(-3.2, -1.2)], st));
+            p.line_segment([c, c + v(0.0, -3.0)], st);
+            p.line_segment([c, c + v(2.5, 1.5)], st);
+        }
+        Icon::Lock => {
+            let body = egui::Rect::from_center_size(c + v(0.0, 2.0), v(11.0, 8.0));
+            p.rect_stroke(body, CornerRadius::same(2), st, StrokeKind::Inside);
+            p.add(egui::Shape::line(arc(c + v(0.0, -2.0), 3.5, 180.0, 360.0), st));
+            p.line_segment([c + v(-3.5, -2.0), c + v(-3.5, -1.5)], st);
+            p.line_segment([c + v(3.5, -2.0), c + v(3.5, -1.5)], st);
+        }
+        Icon::Terminal => {
+            p.add(egui::Shape::line(vec![c + v(-6.0, -4.0), c + v(-2.0, 0.0), c + v(-6.0, 4.0)], st));
+            p.line_segment([c + v(0.0, 4.5), c + v(6.0, 4.5)], st);
+        }
+        Icon::Reload => {
+            p.add(egui::Shape::line(arc(c, 5.5, -60.0, 230.0), st));
+            let tip = c + v(5.5 * (-60f32).to_radians().cos(), 5.5 * (-60f32).to_radians().sin());
+            p.add(egui::Shape::line(vec![tip + v(-4.0, -0.5), tip, tip + v(0.5, 4.0)], st));
+        }
+        Icon::Plus => {
+            p.line_segment([c - v(6.0, 0.0), c + v(6.0, 0.0)], st);
+            p.line_segment([c - v(0.0, 6.0), c + v(0.0, 6.0)], st);
+        }
+        Icon::Pulse => {
+            p.add(egui::Shape::line(vec![c + v(-7.0, 0.0), c + v(-3.5, 0.0), c + v(-1.5, -6.0), c + v(2.0, 6.0), c + v(4.0, 0.0), c + v(7.0, 0.0)], st));
+        }
+        Icon::Gear => {
+            p.circle_stroke(c, 2.3, st);
+            for i in 0..8 {
+                let a = (i as f32 * 45.0).to_radians();
+                let (d, e) = (v(a.cos(), a.sin()), 0.0);
+                let _ = e;
+                p.line_segment([c + d * 5.4, c + d * 7.2], Stroke::new(2.0, color));
+            }
+            p.circle_stroke(c, 5.2, st);
+        }
+        Icon::Power => {
+            p.add(egui::Shape::line(arc(c + v(0.0, 0.5), 5.8, -50.0, 230.0), st));
+            p.line_segment([c + v(0.0, -7.0), c + v(0.0, -1.0)], st);
         }
     }
 }
 
-fn icon_btn(ui: &mut Ui, colors: &Colors, icon: Icon, tip: &str) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 26.0), Sense::click());
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(5), c32(&colors.tab_hover));
+pub fn paint_database(p: &egui::Painter, c: egui::Pos2, color: Color32) {
+    paint_icon(p, c, Icon::Database, color);
+}
+
+fn icon_btn(ui: &mut Ui, colors: &Colors, icon: Icon, tip: &str, active: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 26.0), Sense::click());
+    if active {
+        ui.painter().rect_filled(rect, CornerRadius::same(13), c32(&colors.tab_selected).gamma_multiply(0.8));
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(13), c32(&colors.tab_hover));
     }
-    paint_icon(ui.painter(), rect.center(), icon, c32(&colors.tab_text));
+    paint_icon(ui.painter(), rect.center(), icon, c32(&colors.text));
     resp.on_hover_text(tip).clicked()
+}
+
+/// A cluster of icon buttons on one rounded background, as TablePlus groups its toolbar.
+fn group(ui: &mut Ui, colors: &Colors, add: impl FnOnce(&mut Ui)) {
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let rect = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(3.0);
+            add(ui);
+            ui.add_space(3.0);
+        })
+        .response
+        .rect;
+    let cy = ui.max_rect().center().y;
+    let rect = egui::Rect::from_min_max(egui::pos2(rect.left(), cy - 17.0), egui::pos2(rect.right(), cy + 17.0));
+    ui.painter().set(bg, egui::epaint::RectShape::filled(rect, CornerRadius::same(17), c32(&colors.toolbar_group)));
 }
 
 pub fn show(ui: &mut Ui, d: &Data) -> Out {
     let mut out = Out::default();
     let colors = d.colors;
     ui.horizontal_centered(|ui| {
-        ui.add_space(10.0);
-        if icon_btn(ui, colors, if d.sidebar_open { Icon::SidebarOpen } else { Icon::SidebarClosed }, "Toggle sidebar (Cmd+\\)") {
-            out.toggle_sidebar = true;
-        }
-        if widgets::small_button(ui, &format!("{}  …", d.database)).on_hover_text("Open database (Cmd+K)").clicked() {
-            out.open_database = true;
-        }
+        use crate::sidebar::Mode;
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.add_space(12.0);
+        group(ui, colors, |ui| {
+            if icon_btn(ui, colors, Icon::Sidebar, "Toggle sidebar (Cmd+\\)", false) {
+                out.toggle_sidebar = true;
+            }
+        });
+        group(ui, colors, |ui| {
+            for (mode, icon, tip) in [(Mode::Items, Icon::Database, "Items"), (Mode::Queries, Icon::Star, "Saved queries"), (Mode::History, Icon::Clock, "History")] {
+                if icon_btn(ui, colors, icon, tip, d.sidebar_open && d.mode == mode) {
+                    out.mode = Some(mode);
+                }
+            }
+        });
+        group(ui, colors, |ui| {
+            if icon_btn(ui, colors, Icon::Lock, "Open database (Cmd+K)", false) {
+                out.open_database = true;
+            }
+            if icon_btn(ui, colors, Icon::Terminal, "New SQL query (Cmd+T)", false) {
+                out.new_query = true;
+            }
+        });
+        ui.add_space(2.0);
 
-        let right_w = 4.0 * 30.0 + 40.0;
-        let pill_w = (ui.available_width() - right_w).clamp(220.0, 720.0);
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(pill_w, 28.0), Sense::click());
+        // centre the pill in the window: equal room on both sides, sized by the busier side
+        let full = ui.max_rect();
+        let right_w = 5.0 * 30.0 + 6.0 + 20.0;
+        let side = (ui.cursor().left() - full.left()).max(right_w) + 8.0;
+        let pill_w = (full.width() - 2.0 * side).clamp(220.0, 820.0);
+        ui.add_space((full.center().x - pill_w / 2.0 - ui.cursor().left()).max(0.0));
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(pill_w, 26.0), Sense::click());
         let tag = conn_color(colors, d.color_tag);
         let t = ui.ctx().animate_bool_with_time(egui::Id::new("pill_busy"), d.busy && d.alive, 0.16);
 
@@ -155,10 +267,10 @@ pub fn show(ui: &mut Ui, d: &Data) -> Out {
                 format!("{env}  |  PostgreSQL {}{tls} : {} : {} : {}", d.server, d.database, d.user, d.where_)
             }
         };
-        let font = FontId::proportional(12.0);
+        let font = crate::theme::mono(12.0); // TablePlus sets the pill in SF Mono
         let shown = {
             // keep it on one line inside the pill
-            let max = ((pill_w - 28.0) / 6.3) as usize;
+            let max = ((pill_w - 28.0) / 7.3) as usize;
             if text.chars().count() > max { text.chars().take(max.saturating_sub(1)).collect::<String>() + "…" } else { text }
         };
         let center = rect.center() + egui::vec2(3.0, 0.0);
@@ -171,22 +283,24 @@ pub fn show(ui: &mut Ui, d: &Data) -> Out {
         }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add_space(8.0);
-            if icon_btn(ui, colors, Icon::Power, "Disconnect") {
-                out.disconnect = true;
-            }
-            if icon_btn(ui, colors, Icon::Text("⚙"), "Settings (Cmd+,)") {
-                out.settings = true;
-            }
-            if icon_btn(ui, colors, Icon::Text("☰"), "Process list (Cmd+.)") {
-                out.processes = true;
-            }
-            if icon_btn(ui, colors, Icon::Plus, "New SQL tab (Cmd+T)") {
-                out.new_query = true;
-            }
-            if icon_btn(ui, colors, Icon::Text("⟳"), "Reload (Cmd+R)") {
-                out.reload = true;
-            }
+            ui.add_space(12.0);
+            group(ui, colors, |ui| {
+                if icon_btn(ui, colors, Icon::Power, "Disconnect", false) {
+                    out.disconnect = true;
+                }
+                if icon_btn(ui, colors, Icon::Gear, "Settings (Cmd+,)", false) {
+                    out.settings = true;
+                }
+                if icon_btn(ui, colors, Icon::Pulse, "Process list (Cmd+.)", false) {
+                    out.processes = true;
+                }
+                if icon_btn(ui, colors, Icon::Plus, "Add row (Cmd+I)", false) {
+                    out.add_row = true;
+                }
+                if icon_btn(ui, colors, Icon::Reload, "Reload (Cmd+R)", false) {
+                    out.reload = true;
+                }
+            });
         });
     });
     out

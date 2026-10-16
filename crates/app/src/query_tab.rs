@@ -126,18 +126,46 @@ impl QueryTab {
         }
 
         // toolbar
-        egui::Frame::new().fill(c32(&colors.sidebar_bg)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
+        egui::Frame::new().fill(c32(&colors.app_bg)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
             ui.set_width(ui.available_width());
+            let r = ui.max_rect();
+            ui.painter().line_segment([r.left_bottom() + egui::vec2(-10.0, 6.0), r.right_bottom() + egui::vec2(10.0, 6.0)], egui::Stroke::new(1.0, c32(&colors.control_border)));
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
                 let running = self.task.is_some();
-                if widgets::primary_button(ui, &colors, "▶ Run  (Cmd+Enter)", !running).clicked() {
+                let btn = |ui: &mut Ui, text: &str, enabled: bool, tip: &str| ui.add_enabled(enabled, egui::Button::new(text).min_size(egui::vec2(0.0, 26.0))).on_hover_text(tip).clicked();
+                if btn(ui, "▶  Run Current", !running, "Run the statement under the cursor (Cmd+Enter)") {
                     self.run(cx, false);
                 }
-                if ui.add_enabled(!running, egui::Button::new("Run all  (Cmd+Shift+Enter)").min_size(egui::vec2(0.0, 26.0))).clicked() {
+                if btn(ui, "Run All", !running, "Run every statement (Cmd+Shift+Enter)") {
                     self.run(cx, true);
                 }
-                if running && widgets::button(ui, "Cancel").clicked() {
+                if btn(ui, "Stop", running, "Cancel the running query") {
                     self.cancel(cx);
+                }
+                let (sep, _) = ui.allocate_exact_size(egui::vec2(9.0, 20.0), egui::Sense::hover());
+                ui.painter().line_segment([sep.center_top(), sep.center_bottom()], egui::Stroke::new(1.0, c32(&colors.control_border)));
+                if btn(ui, "★  Save", true, "Save as a favourite query") {
+                    self.save_name = Some(self.title.clone());
+                }
+                if btn(ui, "Save file", true, "Write the SQL to a .sql file") {
+                    if let Some(p) = rfd::FileDialog::new().set_file_name("query.sql").save_file() {
+                        match std::fs::write(&p, &self.sql) {
+                            Ok(()) => cx.env.ok(format!("Saved {}", p.display())),
+                            Err(e) => cx.env.err(e.to_string()),
+                        }
+                    }
+                }
+                if btn(ui, "Open file", true, "Load a .sql file into this tab") {
+                    if let Some(p) = rfd::FileDialog::new().add_filter("SQL", &["sql"]).pick_file() {
+                        match std::fs::read_to_string(&p) {
+                            Ok(t) => {
+                                self.sql = t;
+                                self.title = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(self.title.clone());
+                            }
+                            Err(e) => cx.env.err(e.to_string()),
+                        }
+                    }
                 }
                 if running {
                     ui.spinner();
@@ -145,30 +173,6 @@ impl QueryTab {
                         ui.label(widgets::dim(ui, format!("{:.1}s", t.elapsed().as_secs_f32())));
                     }
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if widgets::small_button(ui, "Save .sql").clicked() {
-                        if let Some(p) = rfd::FileDialog::new().set_file_name("query.sql").save_file() {
-                            match std::fs::write(&p, &self.sql) {
-                                Ok(()) => cx.env.ok(format!("Saved {}", p.display())),
-                                Err(e) => cx.env.err(e.to_string()),
-                            }
-                        }
-                    }
-                    if widgets::small_button(ui, "Open .sql").clicked() {
-                        if let Some(p) = rfd::FileDialog::new().add_filter("SQL", &["sql"]).pick_file() {
-                            match std::fs::read_to_string(&p) {
-                                Ok(t) => {
-                                    self.sql = t;
-                                    self.title = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(self.title.clone());
-                                }
-                                Err(e) => cx.env.err(e.to_string()),
-                            }
-                        }
-                    }
-                    if widgets::small_button(ui, "★ Save query").clicked() {
-                        self.save_name = Some(self.title.clone());
-                    }
-                });
             });
         });
 
@@ -256,7 +260,7 @@ impl QueryTab {
                 }
             }
         });
-        egui::Frame::new().fill(c32(&colors.sidebar_bg)).inner_margin(egui::Margin::symmetric(10, 4)).show(ui, |ui| {
+        egui::Frame::new().fill(c32(&colors.content_bg)).inner_margin(egui::Margin::symmetric(10, 4)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.set_height(footer_h - 8.0);
             ui.horizontal(|ui| {

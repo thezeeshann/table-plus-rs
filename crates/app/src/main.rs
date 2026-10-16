@@ -2,7 +2,6 @@
 //!
 //! Environment:
 //! - `TABLE_PLUS_RS_HOME`  config directory override (connections, history, settings)
-//! - `TABLE_PLUS_RS_THEME` theme id (see Settings); `--theme NAME` on the command line wins
 //! - `TABLE_PLUS_RS_RENDERER=glow|wgpu` force a renderer (default: wgpu on macOS)
 //! - `RUST_LOG` log filter
 

@@ -25,7 +25,6 @@ enum Step {
     View(&'static str),
     Query(&'static str),
     RunQuery,
-    Theme(&'static str),
     Settings,
     CloseSettings,
     Edit(usize, usize, &'static str),
@@ -52,14 +51,11 @@ impl Script {
             Step::Seed,
             Step::Wait(6),
             Step::Shot("welcome"),
-            Step::Theme("one-dark"),
-            Step::Wait(8),
-            Step::Shot("welcome-one-dark"),
-            Step::Theme("default"),
-            Step::Wait(4),
             Step::Connect,
             Step::WaitWorkspace,
             Step::Log("connected"),
+            Step::Wait(10),
+            Step::Shot("workspace-empty"),
             Step::Open("users"),
             Step::WaitIdle,
             Step::Shot("table-data"),
@@ -85,10 +81,6 @@ impl Script {
             Step::Wait(30),
             Step::Shot("loading"),
             Step::WaitIdle,
-            Step::Theme("arc-blueberry"),
-            Step::Wait(6),
-            Step::Shot("theme-arc-blueberry"),
-            Step::Theme("atelier"),
             Step::Settings,
             Step::Wait(20),
             Step::Shot("settings"),
@@ -193,9 +185,8 @@ impl Script {
                 app.script_with_workspace(|ws, _| ws.script_query(&sql));
             }
             Step::RunQuery => app.script_with_workspace(|ws, env| ws.script_run(env)),
-            Step::Theme(t) => app.script_set_theme(ctx, t),
             Step::Settings => app.script_open_settings(),
-            Step::CloseSettings => app.script_close_settings(ctx),
+            Step::CloseSettings => app.script_close_settings(),
             Step::Edit(r, c, t) => {
                 let (r, c, t) = (*r, *c, t.to_string());
                 app.script_with_workspace(|ws, _| ws.script_edit(r, c, &t));

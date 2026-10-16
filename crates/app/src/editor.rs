@@ -38,9 +38,10 @@ pub fn highlight(colors: &Colors, text: &str, size: f32, wrap_width: f32) -> Lay
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap_width;
     let fmt = |hex: &str| TextFormat { font_id: font.clone(), color: c32(hex), ..Default::default() };
-    let (kw, st, num, cm, func, ident, ty, punct) = (
+    let (kw, st, num, cm, func, ident, ty, punct, quoted) = (
         fmt(&colors.ed_keyword), fmt(&colors.ed_string), fmt(&colors.ed_number), fmt(&colors.ed_comment),
         fmt(&colors.ed_function), fmt(&colors.ed_ident), fmt(&colors.ed_type), fmt(&colors.ed_punct),
+        fmt(&colors.ed_quoted),
     );
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let n = chars.len();
@@ -74,7 +75,7 @@ pub fn highlight(colors: &Colors, text: &str, size: f32, wrap_width: f32) -> Lay
                 }
                 i += 1;
             }
-            job.append(&text[byte(start)..byte(i)], 0.0, if c == '"' { ident.clone() } else { st.clone() });
+            job.append(&text[byte(start)..byte(i)], 0.0, if c == '"' { quoted.clone() } else { st.clone() });
         } else if c.is_ascii_digit() {
             while i < n && (chars[i].1.is_ascii_digit() || chars[i].1 == '.') {
                 i += 1;
@@ -327,7 +328,7 @@ mod tests {
 
     #[test]
     fn highlight_covers_the_whole_text() {
-        let c = crate::theme::jade();
+        let c = crate::theme::tableplus();
         let sql = "SELECT 'it''s', 42 -- note\nFROM t /* c */ WHERE \"A\" = now();";
         let job = highlight(&c, sql, 12.0, f32::INFINITY);
         assert_eq!(job.text, sql);

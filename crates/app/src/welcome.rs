@@ -14,13 +14,13 @@ const SSL_MODES: [&str; 5] = ["disable", "prefer", "require", "verify-ca", "veri
 
 pub enum Event {
     Connect(ConnectionConfig),
-    Theme(usize),
 }
 
 pub struct Welcome {
     connections: Vec<ConnectionConfig>,
     selected: Option<String>,
     form: Option<Form>,
+    search: String,
     confirm_delete: Option<String>,
     pub error: Option<String>,
     pub connecting: Option<String>,
@@ -38,7 +38,7 @@ struct Form {
 
 impl Welcome {
     pub fn new(env: &Env) -> Self {
-        let mut w = Self { connections: vec![], selected: None, form: None, confirm_delete: None, error: None, connecting: None };
+        let mut w = Self { connections: vec![], selected: None, form: None, search: String::new(), confirm_delete: None, error: None, connecting: None };
         w.reload(env);
         w
     }
@@ -59,61 +59,76 @@ impl Welcome {
         self.connections.iter().find(|c| c.name == name || c.id == name).cloned()
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, env: &mut Env, theme: usize) -> Option<Event> {
+    pub fn ui(&mut self, ui: &mut Ui, env: &mut Env) -> Option<Event> {
         let mut event = None;
         let colors = env.colors.clone();
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(c32(&colors.content_bg))).show(ui, |ui| {
-            ui.add_space(36.0);
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new("table-plus-rs").size(26.0).strong());
-                ui.label(widgets::dim(ui, "A fast, native PostgreSQL client"));
-            });
-            ui.add_space(14.0);
-            if let Some(i) = theme_picker(ui, &colors, theme) {
-                event = Some(Event::Theme(i));
-            }
-            ui.add_space(18.0);
-            let width = 640.0_f32.min(ui.available_width() - 40.0);
-            ui.vertical_centered(|ui| {
-                ui.allocate_ui(egui::vec2(width, ui.available_height()), |ui| {
-                    ui.horizontal(|ui| {
-                        if widgets::primary_button(ui, &colors, "+ New connection", true).clicked() {
-                            self.form = Some(Form::new(ConnectionConfig::blank(), false));
-                        }
-                        let sel = self.selected.clone();
-                        if ui.add_enabled(sel.is_some(), egui::Button::new("Edit").min_size(egui::vec2(0.0, 26.0))).clicked() {
-                            if let Some(c) = sel.as_ref().and_then(|id| env.storage.get_connection(id).ok()) {
-                                self.form = Some(Form::new(c, true));
-                            }
-                        }
-                        if ui.add_enabled(sel.is_some(), egui::Button::new("Delete").min_size(egui::vec2(0.0, 26.0))).clicked() {
-                            self.confirm_delete = sel.clone();
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let can = sel.is_some() && self.connecting.is_none();
-                            let label = if self.connecting.is_some() { "Connecting…" } else { "Connect" };
-                            if widgets::primary_button(ui, &colors, label, can).clicked() {
-                                event = sel.as_ref().and_then(|id| env.storage.get_connection(id).ok()).map(Event::Connect);
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    if let Some(err) = &self.error {
-                        ui.label(RichText::new(err).color(c32(&colors.danger_text)));
-                        ui.add_space(6.0);
+        let sel = self.selected.clone();
+
+        // top bar: search on the left, actions on the right
+        egui::Panel::top("welcome_bar").exact_size(52.0).frame(egui::Frame::new().fill(c32(&colors.app_bg))).show(ui, |ui| {
+            let r = ui.max_rect();
+            ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, c32(&colors.control_border)));
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.add_space(12.0);
+                let resp = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search for connection...").desired_width(360.0).margin(egui::Margin::symmetric(28, 5)));
+                let c = egui::pos2(resp.rect.left() + 14.0, resp.rect.center().y - 1.0);
+                let st = Stroke::new(1.2, c32(&colors.text_dim));
+                ui.painter().circle_stroke(c, 4.0, st);
+                ui.painter().line_segment([c + egui::vec2(3.0, 3.0), c + egui::vec2(6.0, 6.0)], st);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    if widgets::primary_button(ui, &colors, "+ New Connection", true).clicked() {
+                        self.form = Some(Form::new(ConnectionConfig::blank(), false));
                     }
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                        if self.connections.is_empty() {
-                            ui.add_space(30.0);
-                            ui.vertical_centered(|ui| ui.label(widgets::dim(ui, "No connections yet. Create one to get started.")));
+                    let can = sel.is_some() && self.connecting.is_none();
+                    let label = if self.connecting.is_some() { "Connecting…" } else { "Connect" };
+                    if ui.add_enabled(can, egui::Button::new(label).min_size(egui::vec2(0.0, 26.0))).clicked() {
+                        event = sel.as_ref().and_then(|id| env.storage.get_connection(id).ok()).map(Event::Connect);
+                    }
+                    if ui.add_enabled(sel.is_some(), egui::Button::new("Delete").min_size(egui::vec2(0.0, 26.0))).clicked() {
+                        self.confirm_delete = sel.clone();
+                    }
+                    if ui.add_enabled(sel.is_some(), egui::Button::new("Edit").min_size(egui::vec2(0.0, 26.0))).clicked() {
+                        if let Some(c) = sel.as_ref().and_then(|id| env.storage.get_connection(id).ok()) {
+                            self.form = Some(Form::new(c, true));
                         }
-                        for c in self.connections.clone() {
-                            if let Some(e) = self.row(ui, env, &c) {
-                                event = Some(e);
-                            }
-                        }
-                    });
+                    }
                 });
+            });
+        });
+
+        let total = self.connections.len();
+        egui::Panel::bottom("welcome_footer").exact_size(26.0).frame(egui::Frame::new().fill(c32(&colors.app_bg)).inner_margin(egui::Margin::symmetric(12, 4))).show(ui, |ui| {
+            let r = ui.max_rect();
+            ui.painter().line_segment([r.left_top() - egui::vec2(12.0, 4.0), r.right_top() + egui::vec2(12.0, -4.0)], Stroke::new(1.0, c32(&colors.control_border)));
+            ui.label(RichText::new(format!("{total} connection{} · double-click to open · PostgreSQL only", if total == 1 { "" } else { "s" })).size(11.0).color(c32(&colors.text_dim)));
+        });
+
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(c32(&colors.app_bg)).inner_margin(egui::Margin::symmetric(12, 12))).show(ui, |ui| {
+            if let Some(err) = &self.error {
+                ui.label(RichText::new(err).color(c32(&colors.danger_text)));
+                ui.add_space(6.0);
+            }
+            let q = self.search.trim().to_lowercase();
+            let shown: Vec<ConnectionConfig> = self
+                .connections
+                .iter()
+                .filter(|c| q.is_empty() || c.name.to_lowercase().contains(&q) || c.host.to_lowercase().contains(&q) || c.database.to_lowercase().contains(&q))
+                .cloned()
+                .collect();
+            if shown.is_empty() {
+                ui.add_space(30.0);
+                ui.vertical_centered(|ui| ui.label(widgets::dim(ui, if total == 0 { "No connections yet. Create one to get started." } else { "No connection matches your search." })));
+            }
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                ui.set_max_width(400.0);
+                ui.spacing_mut().item_spacing.y = 6.0;
+                for c in shown {
+                    if let Some(e) = self.row(ui, env, &c) {
+                        event = Some(e);
+                    }
+                }
             });
         });
 
@@ -125,25 +140,28 @@ impl Welcome {
     fn row(&mut self, ui: &mut Ui, env: &Env, c: &ConnectionConfig) -> Option<Event> {
         let colors = &env.colors;
         let selected = self.selected.as_deref() == Some(&c.id);
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), Sense::click());
-        let fill = if selected { c32(&colors.selection) } else if resp.hovered() { c32(&colors.tab_bg) } else { c32(&colors.control_bg) };
-        ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
-        ui.painter().rect_stroke(rect, CornerRadius::same(7), Stroke::new(1.0, c32(&colors.control_border)), StrokeKind::Inside);
-        let stripe = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 6.0), egui::vec2(4.0, rect.height() - 12.0));
-        ui.painter().rect_filled(stripe, CornerRadius::same(2), conn_color(colors, &c.color));
-        let text = c32(&colors.text);
-        ui.painter().text(rect.min + egui::vec2(18.0, 10.0), egui::Align2::LEFT_TOP, &c.name, egui::FontId::proportional(14.0), text);
-        let detail = format!("{}@{}:{} / {}", c.user, c.host, c.port, c.database);
-        ui.painter().text(rect.min + egui::vec2(18.0, 31.0), egui::Align2::LEFT_TOP, detail, egui::FontId::proportional(11.5), c32(&colors.text_dim));
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width().min(400.0), 46.0), Sense::click());
+        let fill = if selected { c32(&colors.selection) } else if resp.hovered() { c32(&colors.tab_hover) } else { c32(&colors.control_bg) };
+        let radius = CornerRadius::same(5);
+        ui.painter().rect_filled(rect, radius, fill);
+        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, if selected { c32(&colors.accent) } else { c32(&colors.control_border) }), StrokeKind::Inside);
+        // colored database tile
+        let tile = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 8.0), egui::vec2(30.0, 30.0));
+        ui.painter().rect_filled(tile, CornerRadius::same(5), conn_color(colors, &c.color));
+        crate::toolbar::paint_database(ui.painter(), tile.center(), Color32::from_white_alpha(225));
+        // selected rows carry white text, as macOS and TablePlus draw them
+        let text = if selected { Color32::WHITE } else { c32(&colors.text) };
+        let detail_col = if selected { Color32::from_white_alpha(200) } else { c32(&colors.text_dim) };
+        let name = ui.painter().text(rect.min + egui::vec2(50.0, 9.0), egui::Align2::LEFT_TOP, &c.name, egui::FontId::proportional(14.0), text);
+        let detail = format!("{}@{}:{}/{}", c.user, c.host, c.port, c.database);
+        let clip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 8.0, rect.bottom()));
+        ui.painter().with_clip_rect(clip).text(rect.min + egui::vec2(50.0, 27.0), egui::Align2::LEFT_TOP, detail, egui::FontId::proportional(11.0), detail_col);
         if !c.environment.is_empty() {
             let col = env_color(colors, &c.environment);
-            let galley = ui.painter().layout_no_wrap(c.environment.to_uppercase(), egui::FontId::proportional(10.0), col);
-            let r = egui::Rect::from_min_size(
-                egui::pos2(rect.right() - galley.size().x - 24.0, rect.center().y - 9.0),
-                galley.size() + egui::vec2(12.0, 4.0),
-            );
-            ui.painter().rect_filled(r, CornerRadius::same(4), col.gamma_multiply(0.2));
-            ui.painter().galley(r.center() - galley.size() / 2.0, galley, col);
+            let galley = ui.painter().layout_no_wrap(c.environment.to_uppercase(), egui::FontId::proportional(10.0), Color32::WHITE);
+            let r = egui::Rect::from_min_size(egui::pos2(name.right() + 8.0, rect.top() + 9.0), galley.size() + egui::vec2(12.0, 3.0));
+            ui.painter().rect_filled(r, CornerRadius::same(3), col.gamma_multiply(0.75));
+            ui.painter().galley(r.center() - galley.size() / 2.0, galley, Color32::WHITE);
         }
         if resp.clicked() {
             self.selected = Some(c.id.clone());
@@ -151,7 +169,6 @@ impl Welcome {
         if resp.double_clicked() {
             return env.storage.get_connection(&c.id).ok().map(Event::Connect);
         }
-        ui.add_space(4.0);
         None
     }
 
@@ -349,37 +366,6 @@ impl Form {
         cfg.password = None; // never prefill the password field
         Self { cfg, editing, port_text, password: String::new(), url: String::new(), test: None, status: None }
     }
-}
-
-/// Row of theme chips shown on the start screen; clicking one applies it immediately.
-fn theme_picker(ui: &mut Ui, colors: &crate::theme::Colors, current: usize) -> Option<usize> {
-    let chip_w = 124.0;
-    let gap = 6.0;
-    let n = crate::theme::THEMES.len() as f32;
-    let total = n * chip_w + (n - 1.0) * gap;
-    let mut picked = None;
-    ui.horizontal(|ui| {
-        ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
-        ui.spacing_mut().item_spacing.x = gap;
-        for (i, t) in crate::theme::THEMES.iter().enumerate() {
-            let preview = crate::theme::colors_for(i);
-            let (rect, resp) = ui.allocate_exact_size(egui::vec2(chip_w, 30.0), Sense::click());
-            let selected = i == current;
-            let fill = if selected { c32(&colors.tab_selected) } else if resp.hovered() { c32(&colors.tab_hover) } else { c32(&colors.control_bg) };
-            ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
-            ui.painter().rect_stroke(rect, CornerRadius::same(7), Stroke::new(1.0, c32(&colors.control_border)), StrokeKind::Inside);
-            for (k, hex) in [&preview.accent, &preview.success_text, &preview.danger_text].iter().enumerate() {
-                ui.painter().circle_filled(egui::pos2(rect.left() + 13.0 + k as f32 * 9.0, rect.center().y), 3.5, c32(hex));
-            }
-            let text_col = if selected { Color32::WHITE } else { c32(&colors.text) };
-            ui.painter().text(egui::pos2(rect.left() + 44.0, rect.center().y), egui::Align2::LEFT_CENTER, t.name, egui::FontId::proportional(12.0), text_col);
-            if resp.clicked() && !selected {
-                picked = Some(i);
-            }
-            resp.on_hover_text(t.about);
-        }
-    });
-    picked
 }
 
 pub fn env_color(colors: &crate::theme::Colors, env: &str) -> Color32 {

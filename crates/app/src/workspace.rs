@@ -132,6 +132,16 @@ impl Tab {
         }
     }
 
+    fn icon_kind(&self) -> crate::widgets::IconKind {
+        use crate::widgets::IconKind;
+        match &self.kind {
+            Kind::Table(t) => IconKind::of_item(&t.kind),
+            Kind::Query(_) => IconKind::Query,
+            Kind::Processes(_) => IconKind::Processes,
+            Kind::Definition(_) => IconKind::Function,
+        }
+    }
+
     fn busy(&self) -> bool {
         match &self.kind {
             Kind::Table(t) => t.busy(),
@@ -551,7 +561,7 @@ impl Workspace {
         let (where_, is_query) = self.where_label();
         let busy = self.active_busy() || self.is_loading_listing() && self.tabs.is_empty();
         let info = &self.session.info;
-        let tout = egui::Panel::top("toolbar").exact_size(46.0).frame(egui::Frame::new().fill(c32(&colors.app_bg)).stroke(Stroke::new(1.0, c32(&colors.separator)))).show(ui, |ui| {
+        let tout = egui::Panel::top("toolbar").exact_size(52.0).frame(egui::Frame::new().fill(c32(&colors.app_bg))).show(ui, |ui| {
             toolbar::show(
                 ui,
                 &toolbar::Data {
@@ -568,6 +578,7 @@ impl Workspace {
                     alive: self.session.is_alive(),
                     reconnecting: self.reconnect.is_some(),
                     sidebar_open: self.sidebar_open,
+                    mode: self.sidebar.mode,
                 },
             )
         });
@@ -596,6 +607,19 @@ impl Workspace {
         if t.reload {
             self.reload_active(env, &mut actions);
         }
+        if let Some(m) = t.mode {
+            if self.sidebar_open && self.sidebar.mode == m {
+                self.sidebar_open = false;
+            } else {
+                self.sidebar.mode = m;
+                self.sidebar_open = true;
+            }
+        }
+        if t.add_row {
+            if let Some(Kind::Table(tt)) = self.tabs.get_mut(self.active).map(|t| &mut t.kind) {
+                tt.request_add_row();
+            }
+        }
 
         // sidebar
         if self.sidebar_open {
@@ -607,8 +631,10 @@ impl Workspace {
                 .resizable(true)
                 .default_size(250.0)
                 .size_range(180.0..=520.0)
-                .frame(egui::Frame::new().fill(c32(&colors.sidebar_bg)).stroke(Stroke::new(1.0, c32(&colors.separator))))
+                .frame(egui::Frame::new().fill(c32(&colors.sidebar_bg)))
                 .show(ui, |ui| {
+                    let r = ui.max_rect();
+                    ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, c32(&colors.separator)));
                     let data = sidebar::Data {
                         listing: self.listing.as_ref(),
                         loading: self.is_loading_listing(),
@@ -625,16 +651,20 @@ impl Workspace {
 
         // tab strip + content
         egui::CentralPanel::default().frame(egui::Frame::new().fill(c32(&colors.content_bg))).show(ui, |ui| {
-            egui::Panel::top("tab_strip").exact_size(32.0).frame(egui::Frame::new().fill(c32(&colors.app_bg))).show(ui, |ui| {
+            egui::Panel::top("tab_strip").exact_size(30.0).frame(egui::Frame::new().fill(c32(&colors.content_bg))).show(ui, |ui| {
                 self.tab_strip(ui, env);
             });
             if self.tabs.is_empty() {
-                ui.add_space(80.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(RichText::new("Pick a table in the sidebar").size(16.0).color(c32(&colors.text_dim)));
-                    ui.add_space(6.0);
-                    ui.label(widgets::dim(ui, "⌘T for a SQL tab  ·  ⌘K to switch database"));
-                });
+                let area = ui.available_rect_before_wrap();
+                let w = (area.width() * 0.3).clamp(160.0, 300.0);
+                widgets::paint_elephant(ui.painter(), area.center() - egui::vec2(0.0, 10.0), w, &colors);
+                ui.painter().text(
+                    egui::pos2(area.center().x, area.center().y + w * 0.72 / 2.0 + 24.0),
+                    egui::Align2::CENTER_CENTER,
+                    "Pick a table in the sidebar · Cmd+T for a SQL tab · Cmd+K to switch database",
+                    egui::FontId::proportional(12.0),
+                    c32(&colors.text_dim),
+                );
                 return;
             }
             let session = self.session.clone();
@@ -728,39 +758,52 @@ impl Workspace {
         let mut close = None;
         let mut select = None;
         let mut pin = None;
+        let mut new_query = false;
+        let strip = ui.max_rect();
+        ui.painter().line_segment([strip.left_bottom(), strip.right_bottom()], Stroke::new(1.0, c32(&colors.control_border)));
         ui.horizontal_centered(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
-            ui.add_space(6.0);
+            ui.spacing_mut().item_spacing.x = 0.0;
             egui::ScrollArea::horizontal().auto_shrink([false, false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
                     for (i, t) in self.tabs.iter().enumerate() {
                         let mut title = t.title();
                         if title.chars().count() > 26 {
                             title = title.chars().take(25).collect::<String>() + "…";
                         }
-                        let font = egui::FontId::proportional(12.5);
-                        let galley = ui.painter().layout_no_wrap(title, font, c32(&colors.tab_text));
-                        let size = egui::vec2(galley.size().x + 46.0, 24.0);
-                        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+                        let font = egui::FontId::proportional(13.0);
                         let selected = i == self.active;
+                        let probe = ui.painter().layout_no_wrap(title.clone(), font.clone(), egui::Color32::WHITE);
+                        let width = (probe.size().x + 56.0).clamp(110.0, 220.0);
+                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, ui.available_height()), Sense::click());
                         let fill = if selected { c32(&colors.tab_selected) } else if resp.hovered() { c32(&colors.tab_hover) } else { c32(&colors.tab_bg) };
-                        ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+                        ui.painter().rect_filled(rect, CornerRadius::ZERO, fill);
+                        ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.separator)));
                         let text_col = if selected { egui::Color32::WHITE } else { c32(&colors.tab_text) };
-                        let busy_dot = t.busy();
-                        if busy_dot {
-                            ui.painter().circle_filled(egui::pos2(rect.left() + 10.0, rect.center().y), 3.0, c32(&colors.key_color));
+                        let icon_c = egui::pos2(rect.left() + 17.0, rect.center().y);
+                        if t.busy() {
+                            ui.painter().circle_filled(icon_c, 3.5, c32(&colors.key_color));
+                        } else {
+                            crate::widgets::paint_tab_icon(ui.painter(), icon_c, t.icon_kind(), text_col.gamma_multiply(0.75));
                         }
-                        let tx = rect.left() + if busy_dot { 20.0 } else { 12.0 };
-                        let galley = ui.painter().layout_no_wrap(galley.job.text.clone(), egui::FontId::proportional(12.5), text_col);
-                        let _ = tx;
-                        ui.painter().galley(egui::pos2(tx, rect.center().y - galley.size().y / 2.0), galley, text_col);
-                        let x_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 12.0, rect.center().y), egui::vec2(16.0, 16.0));
+                        let galley = ui.painter().layout_no_wrap(title, font, text_col);
+                        let label_pos = egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0);
+                        ui.painter().with_clip_rect(egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 24.0, rect.bottom()))).galley(label_pos, galley, text_col);
+                        if !t.pinned {
+                            // preview tabs (replaced by the next single click) get an underline
+                            let y = rect.center().y + 8.0;
+                            ui.painter().line_segment([egui::pos2(label_pos.x, y), egui::pos2(rect.right() - 28.0, y)], Stroke::new(1.0, text_col.gamma_multiply(0.45)));
+                        }
+                        let x_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 16.0, rect.center().y), egui::vec2(16.0, 16.0));
                         let x_resp = ui.interact(x_rect, ui.id().with(("tabx", t.id)), Sense::click());
                         if resp.hovered() || selected || x_resp.hovered() {
                             if x_resp.hovered() {
-                                ui.painter().rect_filled(x_rect, CornerRadius::same(4), egui::Color32::from_white_alpha(40));
+                                ui.painter().rect_filled(x_rect, CornerRadius::same(3), egui::Color32::from_white_alpha(48));
                             }
-                            ui.painter().text(x_rect.center(), egui::Align2::CENTER_CENTER, "×", egui::FontId::proportional(14.0), text_col);
+                            let c = x_rect.center();
+                            let st = Stroke::new(1.3, text_col);
+                            ui.painter().line_segment([c - egui::vec2(3.0, 3.0), c + egui::vec2(3.0, 3.0)], st);
+                            ui.painter().line_segment([c - egui::vec2(3.0, -3.0), c + egui::vec2(3.0, -3.0)], st);
                         }
                         if x_resp.clicked() || resp.middle_clicked() {
                             close = Some(i);
@@ -770,14 +813,24 @@ impl Workspace {
                         if resp.double_clicked() {
                             pin = Some(i);
                         }
-                        if !t.pinned {
-                            // preview tabs are drawn with an underline instead of italics
-                            ui.painter().line_segment([egui::pos2(rect.left() + 10.0, rect.bottom() - 3.0), egui::pos2(rect.right() - 26.0, rect.bottom() - 3.0)], Stroke::new(1.0, text_col.gamma_multiply(0.6)));
-                        }
+                    }
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(32.0, ui.available_height()), Sense::click());
+                    if resp.hovered() {
+                        ui.painter().rect_filled(rect, CornerRadius::ZERO, c32(&colors.tab_hover));
+                    }
+                    let c = rect.center();
+                    let st = Stroke::new(1.4, c32(&colors.text_dim));
+                    ui.painter().line_segment([c - egui::vec2(5.0, 0.0), c + egui::vec2(5.0, 0.0)], st);
+                    ui.painter().line_segment([c - egui::vec2(0.0, 5.0), c + egui::vec2(0.0, 5.0)], st);
+                    if resp.on_hover_text("New SQL query (Cmd+T)").clicked() {
+                        new_query = true;
                     }
                 });
             });
         });
+        if new_query {
+            self.pending.push(Action::OpenQuery { title: "SQL".into(), sql: String::new() });
+        }
         if let Some(i) = select {
             self.active = i;
         }
@@ -808,7 +861,7 @@ impl Workspace {
                     ui.label(RichText::new(&d.sql).monospace().color(c32(&colors.text_dim)));
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
-                        let fill = if d.danger { c32(&colors.status_err) } else { c32(&colors.tab_selected) };
+                        let fill = if d.danger { c32(&colors.status_err) } else { c32(&colors.accent) };
                         if ui.add(egui::Button::new(RichText::new(&d.confirm).color(egui::Color32::WHITE)).fill(fill).min_size(egui::vec2(72.0, 26.0))).clicked() {
                             run_sql = Some((d.sql.clone(), d.close_table.clone()));
                         }

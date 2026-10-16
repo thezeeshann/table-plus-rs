@@ -63,7 +63,7 @@ impl ProcessTab {
             ui.ctx().request_repaint_after(Duration::from_secs(1));
         }
         let colors = cx.env.colors.clone();
-        egui::Frame::new().fill(c32(&colors.sidebar_bg)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
+        egui::Frame::new().fill(c32(&colors.content_bg)).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Process list").strong());

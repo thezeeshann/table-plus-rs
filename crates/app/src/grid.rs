@@ -7,7 +7,7 @@ use eframe::egui::{self, Align, Color32, CornerRadius, FontId, Key, Modifiers, R
 use egui_extras::{Column, TableBuilder};
 use table_plus_core::model::{CellValue, SortSpec};
 
-use crate::theme::{c32, c32a, mono, Colors};
+use crate::theme::{c32, mono, Colors};
 
 pub enum CellVal<'a> {
     Null,
@@ -118,7 +118,7 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
     let colors = view.colors;
     let n = model.row_count();
     let ncols = view.columns.len();
-    let font = mono(12.5);
+    let font = mono(12.0);
 
     // Keyboard: arrows move the focused cell; Enter edits; ⌘C copies.
     if st.editing.is_none() && ncols > 0 && n > 0 && ui.memory(|m| m.focused().is_none()) {
@@ -170,10 +170,11 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
                         chars = chars.max(t.lines().next().map(|l| l.chars().count()).unwrap_or(0) + 2);
                     }
                 }
-                (chars as f32 * 7.9 + 16.0).clamp(80.0, 380.0)
+                (chars as f32 * 7.3 + 18.0).clamp(80.0, 380.0)
             })
             .collect();
     }
+    ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
     let mut table = TableBuilder::new(ui)
         .id_salt(view.id)
         .striped(false)
@@ -194,27 +195,37 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
     let dim = c32(&colors.text_dim);
 
     table
-        .header(28.0, |mut header| {
+        .header(26.0, |mut header| {
             header.col(|ui| {
-                ui.painter().rect_filled(ui.max_rect(), 0.0, header_bg);
+                let rect = ui.max_rect();
+                ui.painter().rect_filled(rect, 0.0, header_bg);
+                ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
             });
             for (ci, c) in view.columns.iter().enumerate() {
                 header.col(|ui| {
                     let rect = ui.max_rect();
                     ui.painter().rect_filled(rect, 0.0, header_bg);
-                    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.control_border)));
+                    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
+                    ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
                     let resp = ui.interact(rect, ui.id().with(("hdr", ci)), Sense::click());
-                    let mut x = rect.left() + 8.0;
                     let cy = rect.center().y;
+                    let sort_pad = if view.sort.iter().any(|s| s.column == c.name) { 14.0 } else { 0.0 };
+                    let key_w = if c.is_pk { 14.0 } else { 0.0 };
+                    let g = ui.painter().layout_no_wrap(c.name.clone(), FontId::proportional(13.0), text_col);
+                    let room = rect.width() - 16.0 - sort_pad;
+                    let w = g.size().x + key_w;
+                    let mut x = if w <= room { rect.center().x - (w + sort_pad) / 2.0 } else { rect.left() + 8.0 };
                     if c.is_pk {
-                        let g = ui.painter().text(egui::pos2(x, cy), egui::Align2::LEFT_CENTER, "PK", FontId::proportional(9.5), c32(&colors.key_color));
-                        x += g.width() + 5.0;
+                        // small key: ring + shaft + teeth
+                        let kc = egui::pos2(x + 4.0, cy + 2.0);
+                        let ks = Stroke::new(1.2, c32(&colors.key_color));
+                        ui.painter().circle_stroke(kc, 2.6, ks);
+                        ui.painter().line_segment([kc + egui::vec2(2.0, -2.0), kc + egui::vec2(7.0, -7.0)], ks);
+                        ui.painter().line_segment([kc + egui::vec2(5.0, -5.0), kc + egui::vec2(7.0, -3.0)], ks);
+                        x += key_w;
                     }
-                    let g = ui.painter().text(egui::pos2(x, cy), egui::Align2::LEFT_CENTER, &c.name, FontId::proportional(12.5), text_col);
-                    x += g.width() + 6.0;
-                    if !c.type_name.is_empty() && x + 20.0 < rect.right() {
-                        ui.painter().text(egui::pos2(x, cy + 1.0), egui::Align2::LEFT_CENTER, &c.type_name, FontId::proportional(10.0), dim);
-                    }
+                    let clip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 4.0 - sort_pad, rect.bottom()));
+                    ui.painter().with_clip_rect(clip).galley(egui::pos2(x, cy - g.size().y / 2.0), g, text_col);
                     if let Some(pos) = view.sort.iter().position(|s| s.column == c.name) {
                         let arrow = if view.sort[pos].direction == "desc" { "▼" } else { "▲" };
                         ui.painter().text(egui::pos2(rect.right() - 8.0, cy), egui::Align2::RIGHT_CENTER, arrow, FontId::proportional(10.0), c32(&colors.accent));
@@ -240,7 +251,7 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
                 } else if ri % 2 == 1 {
                     Some(c32(&colors.grid_even))
                 } else {
-                    None
+                    Some(c32(&colors.grid_odd))
                 };
                 let row_fill = base.map(|c| if selected && state != RowState::Normal { c.gamma_multiply(0.85) } else { c });
 
@@ -255,7 +266,7 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
                         egui::pos2(rect.right() - 8.0, rect.center().y),
                         egui::Align2::RIGHT_CENTER,
                         (view.first_row_number + ri as u64).to_string(),
-                        FontId::proportional(11.0),
+                        mono(12.0),
                         dim,
                     );
                     if resp.clicked() {
@@ -272,7 +283,7 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
                         if let Some(f) = fill {
                             ui.painter().rect_filled(rect, 0.0, f);
                         }
-                        ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, Color32::from_black_alpha(48)));
+                        ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
 
                         let is_editing = matches!(&st.editing, Some(e) if e.row == ri && e.col == ci);
                         if is_editing {
@@ -298,7 +309,7 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
 
                         let resp = ui.interact(rect, ui.id().with(("cell", ri, ci)), Sense::click());
                         let (text, color, italic): (String, Color32, bool) = match model.cell(ri, ci) {
-                            CellVal::Null => ("NULL".into(), c32a(&colors.text, 0.38), true),
+                            CellVal::Null => ("NULL".into(), c32(&colors.null_text), false),
                             CellVal::Default => ("DEFAULT".into(), c32(&colors.accent), true),
                             CellVal::Expr(e) => (format!("= {e}"), c32(&colors.accent), false),
                             CellVal::Text(t) => (one_line(t), text_col, false),

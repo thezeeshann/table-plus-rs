@@ -1,4 +1,4 @@
-//! Top-level application: owns storage, theme, the welcome screen, the open workspace and toasts.
+//! Top-level application: owns storage, colors, the welcome screen, the open workspace and toasts.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -56,15 +56,12 @@ struct Connecting {
 }
 
 struct SettingsDialog {
-    original: usize,
-    picked: usize,
     settings: AppSettings,
 }
 
 pub struct App {
     _rt: tokio::runtime::Runtime,
     env: Env,
-    theme_index: usize,
     welcome: Welcome,
     ws: Option<Box<Workspace>>,
     connecting: Option<Connecting>,
@@ -77,34 +74,13 @@ impl App {
         let storage = Arc::new(Storage::new(dir).expect("storage directory"));
         let settings = storage.settings().unwrap_or_default();
         let sp = Spawner::new(rt.handle().clone(), cc.egui_ctx.clone());
-        let mut env = Env { sp, storage, colors: Arc::new(theme::jade()), settings, toasts: vec![] };
-
-        let flag = theme::flag_from_args(std::env::args().skip(1));
-        let env_var = std::env::var("TABLE_PLUS_RS_THEME").ok();
-        let theme_index = match theme::resolve(flag.as_deref(), env_var.as_deref(), Some(&env.settings.theme)) {
-            Ok(choice) => {
-                if let Some(w) = choice.warning {
-                    env.err(w);
-                }
-                choice.index
-            }
-            Err(e) => {
-                env.err(e);
-                theme::find(&env.settings.theme).unwrap_or(0)
-            }
-        };
-        env.colors = Arc::new(theme::colors_for(theme_index));
+        let env = Env { sp, storage, colors: Arc::new(theme::tableplus()), settings, toasts: vec![] };
+        theme::install_fonts(&cc.egui_ctx);
         theme::apply(&cc.egui_ctx, &env.colors);
 
         let welcome = Welcome::new(&env);
         let script = crate::script::Script::from_env();
-        Self { _rt: rt, env, theme_index, welcome, ws: None, connecting: None, settings_dialog: None, script }
-    }
-
-    fn set_theme(&mut self, ctx: &egui::Context, index: usize) {
-        self.theme_index = index;
-        self.env.colors = Arc::new(theme::colors_for(index));
-        theme::apply(ctx, &self.env.colors);
+        Self { _rt: rt, env, welcome, ws: None, connecting: None, settings_dialog: None, script }
     }
 
     pub fn start_connect(&mut self, cfg: ConnectionConfig, database: Option<String>) {
@@ -143,36 +119,10 @@ impl App {
         let Some(d) = &mut self.settings_dialog else { return };
         let colors = self.env.colors.clone();
         let (mut save, mut cancel) = (false, false);
-        let mut picked = d.picked;
         let modal = widgets::modal(ctx, &colors, "settings").show(ctx, |ui| {
             ui.set_width(480.0);
             ui.heading("Settings");
             ui.add_space(8.0);
-            widgets::section_title(ui, &colors, "Theme");
-            ui.add_space(4.0);
-            for (i, t) in theme::THEMES.iter().enumerate() {
-                let preview = match t.palette {
-                    None => theme::jade(),
-                    Some(p) => theme::derive(&p),
-                };
-                let selected = picked == i;
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::click());
-                let fill = if selected { c32(&colors.selection) } else if resp.hovered() { c32(&colors.tab_hover) } else { c32(&colors.control_bg) };
-                ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
-                ui.painter().text(rect.min + egui::vec2(12.0, 8.0), Align2::LEFT_TOP, t.name, egui::FontId::proportional(13.5), c32(&colors.text));
-                ui.painter().text(rect.min + egui::vec2(12.0, 26.0), Align2::LEFT_TOP, t.about, egui::FontId::proportional(10.5), c32(&colors.text_dim));
-                for (k, hex) in [&preview.accent, &preview.success_text, &preview.key_color, &preview.danger_text, &preview.ed_function]
-                    .iter()
-                    .enumerate()
-                {
-                    let c = egui::pos2(rect.right() - 16.0 - 16.0 * (4 - k) as f32, rect.center().y);
-                    ui.painter().circle_filled(c, 6.0, c32(hex));
-                }
-                if resp.clicked() {
-                    picked = i;
-                }
-            }
-            ui.add_space(10.0);
             widgets::section_title(ui, &colors, "Data");
             ui.add_space(4.0);
             egui::Grid::new("settings_grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -199,22 +149,14 @@ impl App {
         if modal.should_close() {
             cancel = true;
         }
-        let d = self.settings_dialog.as_mut().unwrap();
-        let changed = picked != d.picked;
-        d.picked = picked;
-        if changed {
-            self.set_theme(ctx, picked);
-        }
         if save {
             let d = self.settings_dialog.take().unwrap();
             let mut s = d.settings;
-            s.theme = theme::THEMES[d.picked].id.to_string();
             s.last_connection_id = self.env.settings.last_connection_id.clone();
             self.env.settings = s;
             self.env.save_settings();
         } else if cancel {
-            let d = self.settings_dialog.take().unwrap();
-            self.set_theme(ctx, d.original);
+            self.settings_dialog = None;
         }
     }
 
@@ -259,18 +201,10 @@ impl eframe::App for App {
                 None => {}
             },
             None => {
-                match self.welcome.ui(ui, &mut self.env, self.theme_index) {
-                    Some(welcome::Event::Connect(cfg)) => {
-                        if self.connecting.is_none() {
-                            self.start_connect(cfg, None);
-                        }
+                if let Some(welcome::Event::Connect(cfg)) = self.welcome.ui(ui, &mut self.env) {
+                    if self.connecting.is_none() {
+                        self.start_connect(cfg, None);
                     }
-                    Some(welcome::Event::Theme(i)) => {
-                        self.set_theme(&ctx, i);
-                        self.env.settings.theme = theme::THEMES[i].id.to_string();
-                        self.env.save_settings();
-                    }
-                    None => {}
                 }
             }
         }
@@ -286,7 +220,7 @@ impl eframe::App for App {
 
 impl App {
     fn open_settings(&mut self) {
-        self.settings_dialog = Some(SettingsDialog { original: self.theme_index, picked: self.theme_index, settings: self.env.settings.clone() });
+        self.settings_dialog = Some(SettingsDialog { settings: self.env.settings.clone() });
     }
 
     /// Dev automation: drives the app through a scripted scenario and saves screenshots.
@@ -310,12 +244,6 @@ impl App {
         self.ws.as_deref_mut()
     }
 
-    pub(crate) fn script_set_theme(&mut self, ctx: &egui::Context, name: &str) {
-        if let Some(i) = theme::find(name) {
-            self.set_theme(ctx, i);
-        }
-    }
-
     pub(crate) fn script_open_settings(&mut self) {
         self.open_settings();
     }
@@ -328,10 +256,8 @@ impl App {
         self.welcome.reload(&self.env);
     }
 
-    pub(crate) fn script_close_settings(&mut self, ctx: &egui::Context) {
-        if let Some(d) = self.settings_dialog.take() {
-            self.set_theme(ctx, d.picked);
-        }
+    pub(crate) fn script_close_settings(&mut self) {
+        self.settings_dialog = None;
     }
 
     pub(crate) fn script_with_workspace(&mut self, f: impl FnOnce(&mut Workspace, &mut Env)) {

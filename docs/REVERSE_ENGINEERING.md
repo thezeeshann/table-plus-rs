@@ -56,6 +56,33 @@ re-implemented in `src-tauri/src/pg/catalog.rs`:
 - Data grid: row numbers, sortable headers, FK cells show `→`, bottom bar `Data | Structure | Index`, `+ Row`, `1-25 of 25 rows`, `Filters`, `Columns`, pager.
 - Menu shortcuts: ⌘S commit, ⌘⇧P preview, ⌘I add row, ⌘D duplicate, ⌘⏎ run current, ⌘⇧⏎ run all, ⌘R reload, ⌘⇧R reconnect, ⌘K open database, ⌘T new tab, ⌘. process list, ⌘L plugins.
 
+## Colors and fonts (observed 2026-10-17)
+
+TablePlus 27.0.2 with `ThemeID = builtin:auto` on a dark Mac draws its built-in **Dark** theme. That
+theme has no JSON in the bundle (only `jade-dark`, `polaris-dark`, `silver-dark`, `sunset-dark`,
+`sunset-light` ship as files, and `Assets.car` holds only app-icon colors), and no disassembler was
+available, so the values were measured from the live window: REA `observe_native_ui` captures
+(evidence `ev_104628a9…`, `ev_dcaf1de6…`) plus a 2x `screencapture` of the same window. The captures
+are Display P3; pixels were converted to sRGB through CoreGraphics. TablePlus was pointed at a
+throwaway local database through a `postgresql://` URL.
+
+| Surface | sRGB |
+|---|---|
+| Toolbar / window (and the empty window before connecting) | `#1a1a1a`; icon groups `#3a3a3a`, icons `#e1e1e1` |
+| Sidebar | `#1f1f1f`; selected row `#005ad1`; search field `#171717`; Items/Queries/History selected `#3b3b3b`, others `#9a9a9a` |
+| Sidebar/content divider | `#000000` |
+| Tab strip | `#242424` area, tabs `#343535`, selected `#6f6f6f` with white text, unselected text `#b3b3b3` |
+| Grid | rows `#1e1e1e` / `#2e2e2e`, header `#242424`, column and header lines `#353535`, `NULL` `#434343` |
+| Editor | background `#242424`, line numbers `#7f7f7f` (current `#ffffff`), text `#c0c0c0` |
+| SQL tokens | keywords and types `#529bd8`, `'strings'` `#ca6e6e`, `"quoted"` `#e04978`, numbers `#b57aff`, comments `#009b31`, function calls uncolored |
+| Bottom bars | `#242424`, buttons `#343434`, selected segment `#117dff`, status text `#9c9c9c` |
+| Text | grid and headers `#d6d6d6`, sidebar `#dddddd`, row numbers `#7f7f7f` |
+| Status pill | always filled with the connection color: preset `#007F3D` measured `#008637` |
+
+The SQL colors are exactly the `Editor*` values in `jade-dark.json`, so the built-in theme shares
+them. Fonts: SF Pro 13 for UI text; SF Mono 12 (7.4pt advance) for grid cells, sidebar items, the
+editor and the status pill.
+
 ## Not ported (out of scope for a PostgreSQL-only v1)
 
 SSH tunnelling (`SSH011/012/095.framework`), backup/restore via bundled `pg_dump`, Metrics Board, ER Diagram, AI assistant / MCP server, plugins, user management, import wizards, Touch ID passcode, Sparkle updater, licensing.
