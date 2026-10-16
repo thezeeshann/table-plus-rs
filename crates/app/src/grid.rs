@@ -174,222 +174,226 @@ pub fn show(ui: &mut Ui, view: &GridView, model: &dyn GridModel, st: &mut GridSt
             })
             .collect();
     }
-    ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-    let mut table = TableBuilder::new(ui)
-        .id_salt(view.id)
-        .striped(false)
-        .resizable(true)
-        .vscroll(true)
-        .auto_shrink([false, false])
-        .cell_layout(egui::Layout::left_to_right(Align::Center))
-        .column(Column::exact(46.0));
-    for w in &st.widths {
-        table = table.column(Column::initial(*w).at_least(44.0).clip(true));
-    }
-    if let Some(r) = st.scroll_to.take() {
-        table = table.scroll_to_row(r, Some(Align::Center));
-    }
+    // TableBuilder only scrolls vertically; the outer area scrolls wide tables sideways
+    // (trackpad swipe, Shift+wheel or the bottom scrollbar).
+    egui::ScrollArea::horizontal().id_salt(("grid_h", view.id)).auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+        let mut table = TableBuilder::new(ui)
+            .id_salt(view.id)
+            .striped(false)
+            .resizable(true)
+            .vscroll(true)
+            .auto_shrink([false, false])
+            .cell_layout(egui::Layout::left_to_right(Align::Center))
+            .column(Column::exact(46.0));
+        for w in &st.widths {
+            table = table.column(Column::initial(*w).at_least(44.0).clip(true));
+        }
+        if let Some(r) = st.scroll_to.take() {
+            table = table.scroll_to_row(r, Some(Align::Center));
+        }
 
-    let header_bg = c32(&colors.grid_header);
-    let text_col = c32(&colors.text);
-    let dim = c32(&colors.text_dim);
+        let header_bg = c32(&colors.grid_header);
+        let text_col = c32(&colors.text);
+        let dim = c32(&colors.text_dim);
 
-    table
-        .header(26.0, |mut header| {
-            header.col(|ui| {
-                let rect = ui.max_rect();
-                ui.painter().rect_filled(rect, 0.0, header_bg);
-                ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
-            });
-            for (ci, c) in view.columns.iter().enumerate() {
+        table
+            .header(26.0, |mut header| {
                 header.col(|ui| {
                     let rect = ui.max_rect();
                     ui.painter().rect_filled(rect, 0.0, header_bg);
                     ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
-                    ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
-                    let resp = ui.interact(rect, ui.id().with(("hdr", ci)), Sense::click());
-                    let cy = rect.center().y;
-                    let sort_pad = if view.sort.iter().any(|s| s.column == c.name) { 14.0 } else { 0.0 };
-                    let key_w = if c.is_pk { 14.0 } else { 0.0 };
-                    let g = ui.painter().layout_no_wrap(c.name.clone(), FontId::proportional(13.0), text_col);
-                    let room = rect.width() - 16.0 - sort_pad;
-                    let w = g.size().x + key_w;
-                    let mut x = if w <= room { rect.center().x - (w + sort_pad) / 2.0 } else { rect.left() + 8.0 };
-                    if c.is_pk {
-                        // small key: ring + shaft + teeth
-                        let kc = egui::pos2(x + 4.0, cy + 2.0);
-                        let ks = Stroke::new(1.2, c32(&colors.key_color));
-                        ui.painter().circle_stroke(kc, 2.6, ks);
-                        ui.painter().line_segment([kc + egui::vec2(2.0, -2.0), kc + egui::vec2(7.0, -7.0)], ks);
-                        ui.painter().line_segment([kc + egui::vec2(5.0, -5.0), kc + egui::vec2(7.0, -3.0)], ks);
-                        x += key_w;
-                    }
-                    let clip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 4.0 - sort_pad, rect.bottom()));
-                    ui.painter().with_clip_rect(clip).galley(egui::pos2(x, cy - g.size().y / 2.0), g, text_col);
-                    if let Some(pos) = view.sort.iter().position(|s| s.column == c.name) {
-                        let arrow = if view.sort[pos].direction == "desc" { "▼" } else { "▲" };
-                        ui.painter().text(egui::pos2(rect.right() - 8.0, cy), egui::Align2::RIGHT_CENTER, arrow, FontId::proportional(10.0), c32(&colors.accent));
-                    }
-                    if resp.clicked() {
-                        out.sort = Some((ci, ui.input(|i| i.modifiers.shift)));
-                    }
-                    resp.on_hover_text(format!("{} {}", c.name, c.type_name).trim().to_string());
                 });
-            }
-        })
-        .body(|body| {
-            body.rows(ROW_H, n, |mut row| {
-                let ri = row.index();
-                let state = model.row_state(ri);
-                let selected = st.selected.contains(&ri);
-                let base = if state == RowState::Inserted {
-                    Some(c32(&colors.row_inserted))
-                } else if state == RowState::Deleted {
-                    Some(c32(&colors.row_deleted))
-                } else if selected {
-                    Some(c32(&colors.selection))
-                } else if ri % 2 == 1 {
-                    Some(c32(&colors.grid_even))
-                } else {
-                    Some(c32(&colors.grid_odd))
-                };
-                let row_fill = base.map(|c| if selected && state != RowState::Normal { c.gamma_multiply(0.85) } else { c });
-
-                // row number
-                row.col(|ui| {
-                    let rect = ui.max_rect();
-                    if let Some(f) = row_fill {
-                        ui.painter().rect_filled(rect, 0.0, f);
-                    }
-                    let resp = ui.interact(rect, ui.id().with(("rn", ri)), Sense::click());
-                    ui.painter().text(
-                        egui::pos2(rect.right() - 8.0, rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        (view.first_row_number + ri as u64).to_string(),
-                        mono(12.0),
-                        dim,
-                    );
-                    if resp.clicked() {
-                        let m = ui.input(|i| i.modifiers);
-                        select_row(st, ri, m);
-                    }
-                });
-
-                for ci in 0..ncols {
-                    row.col(|ui| {
+                for (ci, c) in view.columns.iter().enumerate() {
+                    header.col(|ui| {
                         let rect = ui.max_rect();
-                        let modified = model.cell_modified(ri, ci);
-                        let fill = if modified && state == RowState::Normal { Some(c32(&colors.row_modified)) } else { row_fill };
-                        if let Some(f) = fill {
-                            ui.painter().rect_filled(rect, 0.0, f);
-                        }
+                        ui.painter().rect_filled(rect, 0.0, header_bg);
+                        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
                         ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
-
-                        let is_editing = matches!(&st.editing, Some(e) if e.row == ri && e.col == ci);
-                        if is_editing {
-                            let e = st.editing.as_mut().unwrap();
-                            let resp = ui.put(
-                                rect.shrink2(egui::vec2(1.0, 1.0)),
-                                egui::TextEdit::singleline(&mut e.buf).font(font.clone()).desired_width(rect.width()).margin(egui::Margin::symmetric(5, 3)),
-                            );
-                            if e.fresh {
-                                resp.request_focus();
-                                e.fresh = false;
-                            }
-                            let esc = ui.input(|i| i.key_pressed(Key::Escape));
-                            let enter = resp.has_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                            if esc {
-                                st.editing = None;
-                            } else if enter || (resp.lost_focus() && !esc) {
-                                let e = st.editing.take().unwrap();
-                                out.edited = Some((e.row, e.col, CellValue::Text { value: e.buf }));
-                            }
-                            return;
+                        let resp = ui.interact(rect, ui.id().with(("hdr", ci)), Sense::click());
+                        let cy = rect.center().y;
+                        let sort_pad = if view.sort.iter().any(|s| s.column == c.name) { 14.0 } else { 0.0 };
+                        let key_w = if c.is_pk { 14.0 } else { 0.0 };
+                        let g = ui.painter().layout_no_wrap(c.name.clone(), FontId::proportional(13.0), text_col);
+                        let room = rect.width() - 16.0 - sort_pad;
+                        let w = g.size().x + key_w;
+                        let mut x = if w <= room { rect.center().x - (w + sort_pad) / 2.0 } else { rect.left() + 8.0 };
+                        if c.is_pk {
+                            // small key: ring + shaft + teeth
+                            let kc = egui::pos2(x + 4.0, cy + 2.0);
+                            let ks = Stroke::new(1.2, c32(&colors.key_color));
+                            ui.painter().circle_stroke(kc, 2.6, ks);
+                            ui.painter().line_segment([kc + egui::vec2(2.0, -2.0), kc + egui::vec2(7.0, -7.0)], ks);
+                            ui.painter().line_segment([kc + egui::vec2(5.0, -5.0), kc + egui::vec2(7.0, -3.0)], ks);
+                            x += key_w;
                         }
-
-                        let resp = ui.interact(rect, ui.id().with(("cell", ri, ci)), Sense::click());
-                        let (text, color, italic): (String, Color32, bool) = match model.cell(ri, ci) {
-                            CellVal::Null => ("NULL".into(), c32(&colors.null_text), false),
-                            CellVal::Default => ("DEFAULT".into(), c32(&colors.accent), true),
-                            CellVal::Expr(e) => (format!("= {e}"), c32(&colors.accent), false),
-                            CellVal::Text(t) => (one_line(t), text_col, false),
-                        };
-                        let pos = egui::pos2(rect.left() + 7.0, rect.center().y);
-                        let galley = ui.painter().layout_no_wrap(text.clone(), if italic { FontId::proportional(11.5) } else { font.clone() }, color);
-                        ui.painter().with_clip_rect(rect.shrink2(egui::vec2(0.0, 0.0))).galley(pos - egui::vec2(0.0, galley.size().y / 2.0), galley, color);
-                        if state == RowState::Deleted {
-                            ui.painter().line_segment([egui::pos2(rect.left() + 4.0, rect.center().y), egui::pos2(rect.right() - 4.0, rect.center().y)], Stroke::new(1.0, Color32::from_white_alpha(120)));
-                        }
-                        if st.cell == Some((ri, ci)) {
-                            ui.painter().rect_stroke(rect.shrink(0.5), CornerRadius::ZERO, Stroke::new(1.5, c32(&colors.selection_border)), StrokeKind::Inside);
-                        }
-                        let is_fk = view.columns[ci].is_fk;
-                        if is_fk && matches!(model.cell(ri, ci), CellVal::Text(_)) {
-                            let arrow = egui::Rect::from_center_size(egui::pos2(rect.right() - 12.0, rect.center().y), egui::vec2(16.0, 16.0));
-                            let ar = ui.interact(arrow, ui.id().with(("fk", ri, ci)), Sense::click());
-                            ui.painter().text(arrow.center(), egui::Align2::CENTER_CENTER, "→", FontId::proportional(13.0), if ar.hovered() { Color32::WHITE } else { c32(&colors.accent) });
-                            if ar.clicked() {
-                                out.actions.push(ContextAction::FollowFk(ri, ci));
-                            }
+                        let clip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 4.0 - sort_pad, rect.bottom()));
+                        ui.painter().with_clip_rect(clip).galley(egui::pos2(x, cy - g.size().y / 2.0), g, text_col);
+                        if let Some(pos) = view.sort.iter().position(|s| s.column == c.name) {
+                            let arrow = if view.sort[pos].direction == "desc" { "▼" } else { "▲" };
+                            ui.painter().text(egui::pos2(rect.right() - 8.0, cy), egui::Align2::RIGHT_CENTER, arrow, FontId::proportional(10.0), c32(&colors.accent));
                         }
                         if resp.clicked() {
-                            st.cell = Some((ri, ci));
-                            let m = ui.input(|i| i.modifiers);
-                            if !(m.command || m.shift) {
-                                st.select_only(ri);
-                            } else {
-                                select_row(st, ri, m);
-                            }
+                            out.sort = Some((ci, ui.input(|i| i.modifiers.shift)));
                         }
-                        if resp.double_clicked() && view.editable && state != RowState::Deleted {
-                            let initial = match model.cell(ri, ci) {
-                                CellVal::Text(t) | CellVal::Expr(t) => t.to_string(),
-                                _ => String::new(),
-                            };
-                            st.begin_edit(ri, ci, initial);
-                        }
-                        resp.context_menu(|ui| {
-                            st.cell = Some((ri, ci));
-                            if !st.selected.contains(&ri) {
-                                st.select_only(ri);
-                            }
-                            let value = match model.cell(ri, ci) {
-                                CellVal::Text(t) | CellVal::Expr(t) => Some(t.to_string()),
-                                _ => None,
-                            };
-                            if ui.button("Copy value").clicked() {
-                                out.actions.push(ContextAction::Copy(value.clone().unwrap_or_else(|| "NULL".into())));
-                                ui.close();
-                            }
-                            if ui.button("Filter by this value").clicked() {
-                                out.actions.push(ContextAction::FilterBy(ci, value.clone()));
-                                ui.close();
-                            }
-                            if view.editable {
-                                ui.separator();
-                                if ui.button("Set NULL").clicked() {
-                                    out.actions.push(ContextAction::SetNull(ri, ci));
-                                    ui.close();
-                                }
-                                if ui.button("Set DEFAULT").clicked() {
-                                    out.actions.push(ContextAction::SetDefault(ri, ci));
-                                    ui.close();
-                                }
-                                ui.separator();
-                                if ui.button("Duplicate row(s)").clicked() {
-                                    out.actions.push(ContextAction::DuplicateRows);
-                                    ui.close();
-                                }
-                                if ui.button(RichText::new("Delete row(s)").color(c32(&colors.danger_text))).clicked() {
-                                    out.actions.push(ContextAction::DeleteRows);
-                                    ui.close();
-                                }
-                            }
-                        });
+                        resp.on_hover_text(format!("{} {}", c.name, c.type_name).trim().to_string());
                     });
                 }
+            })
+            .body(|body| {
+                body.rows(ROW_H, n, |mut row| {
+                    let ri = row.index();
+                    let state = model.row_state(ri);
+                    let selected = st.selected.contains(&ri);
+                    let base = if state == RowState::Inserted {
+                        Some(c32(&colors.row_inserted))
+                    } else if state == RowState::Deleted {
+                        Some(c32(&colors.row_deleted))
+                    } else if selected {
+                        Some(c32(&colors.selection))
+                    } else if ri % 2 == 1 {
+                        Some(c32(&colors.grid_even))
+                    } else {
+                        Some(c32(&colors.grid_odd))
+                    };
+                    let row_fill = base.map(|c| if selected && state != RowState::Normal { c.gamma_multiply(0.85) } else { c });
+
+                    // row number
+                    row.col(|ui| {
+                        let rect = ui.max_rect();
+                        if let Some(f) = row_fill {
+                            ui.painter().rect_filled(rect, 0.0, f);
+                        }
+                        let resp = ui.interact(rect, ui.id().with(("rn", ri)), Sense::click());
+                        ui.painter().text(
+                            egui::pos2(rect.right() - 8.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            (view.first_row_number + ri as u64).to_string(),
+                            mono(12.0),
+                            dim,
+                        );
+                        if resp.clicked() {
+                            let m = ui.input(|i| i.modifiers);
+                            select_row(st, ri, m);
+                        }
+                    });
+
+                    for ci in 0..ncols {
+                        row.col(|ui| {
+                            let rect = ui.max_rect();
+                            let modified = model.cell_modified(ri, ci);
+                            let fill = if modified && state == RowState::Normal { Some(c32(&colors.row_modified)) } else { row_fill };
+                            if let Some(f) = fill {
+                                ui.painter().rect_filled(rect, 0.0, f);
+                            }
+                            ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, c32(&colors.grid_line)));
+
+                            let is_editing = matches!(&st.editing, Some(e) if e.row == ri && e.col == ci);
+                            if is_editing {
+                                let e = st.editing.as_mut().unwrap();
+                                let resp = ui.put(
+                                    rect.shrink2(egui::vec2(1.0, 1.0)),
+                                    egui::TextEdit::singleline(&mut e.buf).font(font.clone()).desired_width(rect.width()).margin(egui::Margin::symmetric(5, 3)),
+                                );
+                                if e.fresh {
+                                    resp.request_focus();
+                                    e.fresh = false;
+                                }
+                                let esc = ui.input(|i| i.key_pressed(Key::Escape));
+                                let enter = resp.has_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                                if esc {
+                                    st.editing = None;
+                                } else if enter || (resp.lost_focus() && !esc) {
+                                    let e = st.editing.take().unwrap();
+                                    out.edited = Some((e.row, e.col, CellValue::Text { value: e.buf }));
+                                }
+                                return;
+                            }
+
+                            let resp = ui.interact(rect, ui.id().with(("cell", ri, ci)), Sense::click());
+                            let (text, color, italic): (String, Color32, bool) = match model.cell(ri, ci) {
+                                CellVal::Null => ("NULL".into(), c32(&colors.null_text), false),
+                                CellVal::Default => ("DEFAULT".into(), c32(&colors.accent), true),
+                                CellVal::Expr(e) => (format!("= {e}"), c32(&colors.accent), false),
+                                CellVal::Text(t) => (one_line(t), text_col, false),
+                            };
+                            let pos = egui::pos2(rect.left() + 7.0, rect.center().y);
+                            let galley = ui.painter().layout_no_wrap(text.clone(), if italic { FontId::proportional(11.5) } else { font.clone() }, color);
+                            ui.painter().with_clip_rect(rect.shrink2(egui::vec2(0.0, 0.0))).galley(pos - egui::vec2(0.0, galley.size().y / 2.0), galley, color);
+                            if state == RowState::Deleted {
+                                ui.painter().line_segment([egui::pos2(rect.left() + 4.0, rect.center().y), egui::pos2(rect.right() - 4.0, rect.center().y)], Stroke::new(1.0, Color32::from_white_alpha(120)));
+                            }
+                            if st.cell == Some((ri, ci)) {
+                                ui.painter().rect_stroke(rect.shrink(0.5), CornerRadius::ZERO, Stroke::new(1.5, c32(&colors.selection_border)), StrokeKind::Inside);
+                            }
+                            let is_fk = view.columns[ci].is_fk;
+                            if is_fk && matches!(model.cell(ri, ci), CellVal::Text(_)) {
+                                let arrow = egui::Rect::from_center_size(egui::pos2(rect.right() - 12.0, rect.center().y), egui::vec2(16.0, 16.0));
+                                let ar = ui.interact(arrow, ui.id().with(("fk", ri, ci)), Sense::click());
+                                ui.painter().text(arrow.center(), egui::Align2::CENTER_CENTER, "→", FontId::proportional(13.0), if ar.hovered() { Color32::WHITE } else { c32(&colors.accent) });
+                                if ar.clicked() {
+                                    out.actions.push(ContextAction::FollowFk(ri, ci));
+                                }
+                            }
+                            if resp.clicked() {
+                                st.cell = Some((ri, ci));
+                                let m = ui.input(|i| i.modifiers);
+                                if !(m.command || m.shift) {
+                                    st.select_only(ri);
+                                } else {
+                                    select_row(st, ri, m);
+                                }
+                            }
+                            if resp.double_clicked() && view.editable && state != RowState::Deleted {
+                                let initial = match model.cell(ri, ci) {
+                                    CellVal::Text(t) | CellVal::Expr(t) => t.to_string(),
+                                    _ => String::new(),
+                                };
+                                st.begin_edit(ri, ci, initial);
+                            }
+                            resp.context_menu(|ui| {
+                                st.cell = Some((ri, ci));
+                                if !st.selected.contains(&ri) {
+                                    st.select_only(ri);
+                                }
+                                let value = match model.cell(ri, ci) {
+                                    CellVal::Text(t) | CellVal::Expr(t) => Some(t.to_string()),
+                                    _ => None,
+                                };
+                                if ui.button("Copy value").clicked() {
+                                    out.actions.push(ContextAction::Copy(value.clone().unwrap_or_else(|| "NULL".into())));
+                                    ui.close();
+                                }
+                                if ui.button("Filter by this value").clicked() {
+                                    out.actions.push(ContextAction::FilterBy(ci, value.clone()));
+                                    ui.close();
+                                }
+                                if view.editable {
+                                    ui.separator();
+                                    if ui.button("Set NULL").clicked() {
+                                        out.actions.push(ContextAction::SetNull(ri, ci));
+                                        ui.close();
+                                    }
+                                    if ui.button("Set DEFAULT").clicked() {
+                                        out.actions.push(ContextAction::SetDefault(ri, ci));
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                    if ui.button("Duplicate row(s)").clicked() {
+                                        out.actions.push(ContextAction::DuplicateRows);
+                                        ui.close();
+                                    }
+                                    if ui.button(RichText::new("Delete row(s)").color(c32(&colors.danger_text))).clicked() {
+                                        out.actions.push(ContextAction::DeleteRows);
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        });
+                    }
+                });
             });
-        });
+    });
     out
 }
 

@@ -121,9 +121,17 @@ fn paint_icon(p: &egui::Painter, c: egui::Pos2, icon: Icon, color: Color32) {
             p.line_segment([c + v(0.0, 4.5), c + v(6.0, 4.5)], st);
         }
         Icon::Reload => {
-            p.add(egui::Shape::line(arc(c, 5.5, -60.0, 230.0), st));
-            let tip = c + v(5.5 * (-60f32).to_radians().cos(), 5.5 * (-60f32).to_radians().sin());
-            p.add(egui::Shape::line(vec![tip + v(-4.0, -0.5), tip, tip + v(0.5, 4.0)], st));
+            // clockwise arrow (y points down, so angles grow clockwise): the arc runs from just
+            // below 3 o'clock round to 1 o'clock, and the head sits on its end, along the tangent
+            let (r, end) = (6.0, 300f32.to_radians());
+            p.add(egui::Shape::line(arc(c, r, 15.0, 300.0), st));
+            let tip = c + v(end.cos(), end.sin()) * r;
+            let dir = v(-end.sin(), end.cos());
+            let back = |deg: f32| {
+                let (s, k) = deg.to_radians().sin_cos();
+                tip - v(dir.x * k - dir.y * s, dir.x * s + dir.y * k) * 3.6
+            };
+            p.add(egui::Shape::line(vec![back(40.0), tip, back(-40.0)], st));
         }
         Icon::Plus => {
             p.line_segment([c - v(6.0, 0.0), c + v(6.0, 0.0)], st);
@@ -216,7 +224,7 @@ pub fn show(ui: &mut Ui, d: &Data) -> Out {
         let side = (ui.cursor().left() - full.left()).max(right_w) + 8.0;
         let pill_w = (full.width() - 2.0 * side).clamp(220.0, 820.0);
         ui.add_space((full.center().x - pill_w / 2.0 - ui.cursor().left()).max(0.0));
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(pill_w, 26.0), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(pill_w, 32.0), Sense::click());
         let tag = conn_color(colors, d.color_tag);
         let t = ui.ctx().animate_bool_with_time(egui::Id::new("pill_busy"), d.busy && d.alive, 0.16);
 
@@ -228,13 +236,14 @@ pub fn show(ui: &mut Ui, d: &Data) -> Out {
         } else {
             (lerp(base, tag, t), lerp(c32(&colors.control_border), tag, t), lerp(c32(&colors.text), Color32::WHITE, t))
         };
-        let radius = CornerRadius::same(7);
+        let radius = CornerRadius::same(10);
         ui.painter().rect_filled(rect, radius, fill);
         ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, border), StrokeKind::Inside);
-        // 4px stripe in the connection color (hidden once the whole pill carries it)
+        // 6px stripe in the connection color (hidden once the whole pill carries it)
         if t < 0.99 && d.alive && !d.reconnecting {
-            let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(5.0, rect.height()));
-            ui.painter().rect_filled(stripe, CornerRadius { nw: 7, sw: 7, ne: 0, se: 0 }, tag);
+            // the pill's own rounded shape, clipped to its left edge, so the stripe follows the curve
+            let stripe = egui::Rect::from_min_size(rect.min, egui::vec2(6.0, rect.height()));
+            ui.painter().with_clip_rect(stripe).rect_filled(rect, radius, tag);
         }
         // sweeping highlight while loading
         if t > 0.01 {
